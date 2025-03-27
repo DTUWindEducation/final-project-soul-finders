@@ -43,8 +43,6 @@ def load_airfoil_shape(path_shape):
     path_shape = Path(path_shape)
     data = np.genfromtxt(path_shape, delimiter='', skip_header=8)
     norm_x, norm_y = data[:, 0], data[:, 1]
-    print("Normalized x", norm_x)
-    print("Normalized y", norm_y)
     return norm_x, norm_y
 
 
@@ -83,3 +81,5 @@ def load_airfoil_polar(path_polar):
     except Exception as e:
         print(f"Error loading airfoil polar data: {e}")
         return None, None, None
+    
+
