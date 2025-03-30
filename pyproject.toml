@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Information on the package
+[project]
+name = "final-project-soul-finders"
+description = "A package"
+version = "0.0.1"
+authors = [
+    { name = "Maksymilian Stepniewski", email = "s250235@dtu.dk" },
+    { name = "Fernando Guerra", email = "s240098@dtu.dk"}
+]
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas"
+]
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
