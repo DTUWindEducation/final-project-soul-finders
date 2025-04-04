@@ -164,7 +164,7 @@ def interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry):
     for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
         file_path = os.path.join(polar_files_dir, file_name)
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
-            alpha, cd, _ = load_airfoil_polar(file_path)
+            alpha, _, cd = load_airfoil_polar(file_path)
             cd_data.append(cd)
             if i < len(r):  # Ensure `i` does not exceed the length of `r`
                 blspn_positions.append(r[i])  # Associate polar file with corresponding blade span position

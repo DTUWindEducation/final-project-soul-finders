@@ -87,7 +87,7 @@ plt.show()
 
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-alpha_values = np.linspace(-10, 20, 100)  # Define the range of alpha values for interpolation
+alpha_values = np.linspace(-180, 180, 100)  # Define the range of alpha values for interpolation
 
 interpolated_cl, alpha_grid, blspn_grid = interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry)
 
@@ -105,9 +105,7 @@ plt.show()
 # 7 interpolate 2D airfoil polar data cd
 # Directory containing the polar file
 
-polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
-path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-alpha_values = np.linspace(-10, 20, 100)  # Define the range of alpha values for interpolation
+
 
 interpolated_cd, alpha_grid, blspn_grid = interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry)
 
