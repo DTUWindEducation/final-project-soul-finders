@@ -2,18 +2,25 @@ from __init__ import load_geometry
 from __init__ import load_operational_strategy
 from __init__ import load_airfoil_shape
 from __init__ import load_airfoil_polar
+from __init__ import interpolate_cl_2d
+from __init__ import create_cl_table
+from __init__ import interpolate_cd_2d
+from __init__ import create_cd_table
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.interpolate as interp
 from mpl_toolkits.mplot3d import Axes3D
+import pandas as pd
 
-path_geomtery = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+
+path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
 path_operational_strategy = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
 shape_files = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
 polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 
 # 1. Load the geometry of the wind turbine blade
-r, B, c, Ai = load_geometry(path_geomtery)
+r, B, c, Ai = load_geometry(path_geometry)
 print("Blade_span", r)
 print("twist_angle", B)
 print("chord_length", c)
@@ -43,7 +50,7 @@ for key, folder_path in polar_files.items():
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
             alpha, cl, cd = load_airfoil_polar(file_path)
             
-# 4. Plot the 3D airfoil shape for each chord in the shape_files
+# 5. Plot the 3D airfoil shape for each chord in the shape_files
 fig = plt.figure(figsize=(10, 8))  # Increase figure size
 ax = fig.add_subplot(111, projection='3d')
 
@@ -74,99 +81,59 @@ ax.set_zlim(0,170)
 plt.legend()
 plt.show()
 
-import os
-import numpy as np
-import scipy.interpolate as interp
-import matplotlib.pyplot as plt
 
-# Directory containing the polar files
-data_dir = os.path.join(os.getcwd(), "inputs", "IEA-15-240-RWT", "Airfoils", "polar_files")
+# 6 interpolate 2D airfoil polar data cl
+# Directory containing the polar file
 
-def load_polar_data(file_path):
-    """
-    Load the polar data (α, Cl, Cd) from a file, ignoring comment lines.
-    """
-    cleaned_data = []
-    with open(file_path, "r") as file:
-        for line in file:
-            line = line.strip()
-            if line and not line.startswith("!"):  # Ignore comments and empty lines
-                try:
-                    cleaned_data.append([float(x) for x in line.split()])
-                except ValueError:
-                    continue  # Skip any malformed lines
-    
-    # Convert to NumPy array
-    data = np.array(cleaned_data)
-    
-    if data.shape[1] < 3:  # Ensure there are at least three columns
-        raise ValueError(f"File {file_path} does not contain expected columns (α, Cl, Cd).")
-    
-    alpha = data[:, 0]  # Angle of attack (α)
-    cl = data[:, 1]     # Lift coefficient (Cl)
-    cd = data[:, 2]     # Drag coefficient (Cd)
-    
-    return alpha, cl, cd
+polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
+path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+alpha_values = np.linspace(-10, 20, 100)  # Define the range of alpha values for interpolation
 
-def interpolate_cl_cd(alpha_values, cl_values, cd_values, alpha_to_interpolate, method='linear'):
-    """
-    Create interpolation functions for Cl and Cd as a function of α.
-    Supports 'linear' and 'cubic' interpolation.
-    """
-    cl_interp = interp.interp1d(alpha_values, cl_values, kind=method, fill_value="extrapolate")
-    cd_interp = interp.interp1d(alpha_values, cd_values, kind=method, fill_value="extrapolate")
-    
-    # Interpolate Cl and Cd for the desired α values
-    cl_interpolated = cl_interp(alpha_to_interpolate)
-    cd_interpolated = cd_interp(alpha_to_interpolate)
-    
-    return cl_interpolated, cd_interpolated
+interpolated_cl, alpha_grid, blspn_grid = interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry)
 
-# Generate file names from 00 to 49
-file_names = [f"IEA-15-240-RWT_AeroDyn15_Polar_{i:02d}.dat" for i in range(50)]
+# Plot the results
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_surface(alpha_grid, blspn_grid, interpolated_cl, cmap='viridis')
 
-# Set up figure for multiple subplots
-fig, ax = plt.subplots(2, 1, figsize=(10, 12))  # Two subplots: one for Cl and one for Cd
-
-# Loop through all files
-for file_name in file_names:
-    file_path = os.path.join(data_dir, file_name)
-    
-    # Check if file exists
-    if not os.path.exists(file_path):
-        print(f"Warning: {file_name} not found, skipping.")
-        continue
-
-    try:
-        alpha, cl, cd = load_polar_data(file_path)
-
-        # Define interpolation range based on available alpha values
-        alpha_to_interpolate = np.linspace(min(alpha), max(alpha), 100)
-
-        # Interpolate Cl and Cd:
-        cl_values, cd_values = interpolate_cl_cd(alpha, cl, cd, alpha_to_interpolate, method='cubic')
-
-        # Plot results
-        ax[0].plot(alpha_to_interpolate, cl_values, label=f"{file_name}", linestyle='-')
-        ax[1].plot(alpha_to_interpolate, cd_values, label=f"{file_name}", linestyle='--')
-
-    except Exception as e:
-        print(f"Error processing {file_name}: {e}")
-
-# Final plot formatting
-ax[0].set_title("Lift Coefficient (Cl) vs. Angle of Attack")
-ax[0].set_xlabel('Angle of Attack (α) [degrees]')
-ax[0].set_ylabel('Cl')
-#ax[0].legend(loc='upper left', fontsize=8, ncol=2)
-ax[0].grid(True)
-
-ax[1].set_title("Drag Coefficient (Cd) vs. Angle of Attack")
-ax[1].set_xlabel('Angle of Attack (α) [degrees]')
-ax[1].set_ylabel('Cd')
-
-#ax[1].legend(loc='upper left', fontsize=8, ncol=2)
-ax[1].grid(True)
-
-plt.tight_layout()
+ax.set_xlabel("Angle of Attack (α) [degrees]")
+ax.set_ylabel("Blade Span (r)")
+ax.set_zlabel("Lift Coefficient (Cl)")
+ax.set_title("Interpolated Cl as a Function of α and Blade Span")
 plt.show()
 
+# 7 interpolate 2D airfoil polar data cd
+# Directory containing the polar file
+
+polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
+path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+alpha_values = np.linspace(-10, 20, 100)  # Define the range of alpha values for interpolation
+
+interpolated_cd, alpha_grid, blspn_grid = interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry)
+
+# Plot the results
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot_surface(alpha_grid, blspn_grid, interpolated_cd, cmap='viridis')
+
+ax.set_xlabel("Angle of Attack (α) [degrees]")
+ax.set_ylabel("Blade Span (r)")
+ax.set_zlabel("Drag Coefficient (Cd)")
+ax.set_title("Interpolated Cd as a Function of α and Blade Span")
+plt.show()
+
+# 8. Generate tables for interpolated Cl and Cd values
+# Create a DataFrame for the interpolated Cd values
+
+# Generate the table
+cd_table = create_cd_table(interpolated_cd, alpha_values, blspn_grid[:, 0])
+
+# 9
+# Create a DataFrame for the interpolated Cl values
+# Generate the table
+cl_table = create_cl_table(interpolated_cl, alpha_values, blspn_grid[:, 0])
+
+output_dir = "./final-project-soul-finders/outputs"
+os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
+cd_table.to_csv(os.path.join(output_dir, "interpolated_cd_table.csv"))
+cl_table.to_csv(os.path.join(output_dir, "interpolated_cl_table.csv"))
