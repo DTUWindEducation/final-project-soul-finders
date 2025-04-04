@@ -6,6 +6,8 @@ from __init__ import interpolate_cl_2d
 from __init__ import create_cl_table
 from __init__ import interpolate_cd_2d
 from __init__ import create_cd_table
+from __init__ import compute_a_s
+from __init__ import sigma_calc
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -87,7 +89,7 @@ plt.show()
 
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-alpha_values = np.linspace(-180, 180, 100)  # Define the range of alpha values for interpolation
+alpha_values = np.linspace(0, 120, 100)  # Define the range of alpha values for interpolation
 
 interpolated_cl, alpha_grid, blspn_grid = interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry)
 
@@ -135,3 +137,12 @@ output_dir = "./final-project-soul-finders/outputs"
 os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
 cd_table.to_csv(os.path.join(output_dir, "interpolated_cd_table.csv"))
 cl_table.to_csv(os.path.join(output_dir, "interpolated_cl_table.csv"))
+
+
+sigma = sigma_calc(r, B, c)
+
+a, a_prime = compute_a_s(r, u, w, B, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100)
+
+# Print the results
+print("Axial induction factor (a):", a)
+print("Tangential induction factor (a'):", a_prime)

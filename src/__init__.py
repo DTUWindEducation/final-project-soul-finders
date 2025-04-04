@@ -90,7 +90,7 @@ def load_airfoil_polar(path_polar):
 
 
 # 6. interpolate 2D airfoil polar data CL
-def interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry):
+def interpolate_cl_2d(alpha_values, polar_files, path_geometry):
     """
     Interpolates Cl as a function of alpha and blade span using 2D interpolation.
 
@@ -112,8 +112,8 @@ def interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry):
     blspn_positions = []
 
     # Loop through polar files and extract Cl data
-    for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
-        file_path = os.path.join(polar_files_dir, file_name)
+    for i, file_name in enumerate(sorted(os.listdir(polar_files))):
+        file_path = os.path.join(polar_files, file_name)
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
             alpha, cl, _ = load_airfoil_polar(file_path)
             cl_data.append(cl)
@@ -139,7 +139,7 @@ def interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry):
 
 # 7. interpolate 2D airfoil polar data CD
 
-def interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry):
+def interpolate_cd_2d(alpha_values, polar_files, path_geometry):
     """
     Interpolates Cl as a function of alpha and blade span using 2D interpolation.
 
@@ -161,8 +161,8 @@ def interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry):
     blspn_positions = []
 
     # Loop through polar files and extract Cl data
-    for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
-        file_path = os.path.join(polar_files_dir, file_name)
+    for i, file_name in enumerate(sorted(os.listdir(polar_files))):
+        file_path = os.path.join(polar_files, file_name)
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
             alpha, _, cd = load_airfoil_polar(file_path)
             cd_data.append(cd)
@@ -231,3 +231,71 @@ def create_cd_table(interpolated_cd, alpha_values, blspn_positions):
     cd_table.index.name = "Blade Span (r)"
     cd_table.columns.name = "Angle of Attack (α)"
     return cd_table
+
+
+
+def sigma_calc(r, B, c):
+    """
+    Calculate the solidity of the blade.
+
+    Parameters:
+        r (array-like): Blade span positions.
+        B (array-like): Number of blades.
+        c (array-like): Chord length.
+
+    Returns:
+        sigma (function): Function to calculate solidity at a given radius.
+    """
+     
+    # Calculate solidity
+    sigma = lambda r: B / (2 * np.pi * r) * c
+    return sigma
+
+
+# 10 computing a and a'
+
+def compute_a_s(r, u, w, B, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100):
+    """
+    Compute the axial induction factor (a) and the tangential induction factor (a').
+
+    Parameters:
+        r (array-like): Blade span positions.
+        u (array-like): Wind speed.
+        w (float): Rotational speed.
+        B (float): Number of blades.
+        interpolated_cl (array-like): Interpolated lift coefficient.
+        interpolated_cd (array-like): Interpolated drag coefficient.
+        sigma (function): Solidity function.
+        tolerance (float): Convergence tolerance.
+        max_iter (int): Maximum number of iterations.
+
+    Returns:
+        tuple: Updated values of a and a'.
+    """
+    # Initialize a and a' arrays
+    an = np.zeros_like(r)
+    an_prime = np.zeros_like(r)
+
+    for iteration in range(max_iter):
+        # Compute flow angle
+        phi = np.arctan((1 - an) * u / ((1 + an_prime) * w))
+        # Compute angle of attack
+        alpha = phi - (w + B)
+        # Compute lift and drag coefficients
+        Cn = interpolated_cl * np.cos(phi) - interpolated_cd * np.sin(phi)
+        Ct = interpolated_cl * np.sin(phi) + interpolated_cd * np.cos(phi)
+
+        # Compute axial induction factor (a) and tangential induction factor (a')
+        a_new = 1 / (4 * (np.sin(phi) ** 2) / (sigma * Cn) + 1)
+        a_prime_new = 1 / (4 * np.sin(phi) * np.cos(phi) / (sigma * Ct) - 1)
+
+        # Check for convergence
+        if np.all(np.abs(a_new - an) < tolerance) and np.all(np.abs(a_prime_new - an_prime) < tolerance):
+            break
+
+        # Update a and a'
+        an = a_new
+        an_prime = a_prime_new
+
+    return an, an_prime
+
