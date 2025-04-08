@@ -1,11 +1,10 @@
+from turbine import TurbineData
 from __init__ import load_geometry
 from __init__ import load_operational_strategy
 from __init__ import load_airfoil_shape
 from __init__ import load_airfoil_polar
-from __init__ import interpolate_cl_2d
-from __init__ import create_cl_table
-from __init__ import interpolate_cd_2d
-from __init__ import create_cd_table
+from __init__ import interpolate_2d
+from __init__ import interpolated_table
 from __init__ import compute_a_s
 from __init__ import sigma_calc
 import os
@@ -21,20 +20,19 @@ path_operational_strategy = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
 shape_files = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
 polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 
-# 1. Load the geometry of the wind turbine blade
-r, B, c, Ai = load_geometry(path_geometry)
-print("Blade_span", r)
-print("twist_angle", B)
-print("chord_length", c)
-print("Airfoil index", Ai)
+#r, B, c, Ai = load_geometry(path_geometry)
+#u, a, w, P, T = load_operational_strategy(path_operational_strategy)
+# Create an object of the WindTurbineData class
+turbine_data = TurbineData(path_geometry, path_operational_strategy)
 
-# 2. Load the operational strategy of the wind turbine
-u, a, w, P, T = load_operational_strategy(path_operational_strategy)
-print("Wind speed", u)
-print("Blade pitch angle", a)
-print("Rotational speed", w)
-print("Power", P)
-print("Thrust", T)
+# Load geometry data
+geometry = turbine_data.load_geometry()
+
+
+# Load operational strategy data
+operational_strategy = turbine_data.load_operational_strategy()
+
+
 
 # 3. Load the airfoil shape
 
@@ -87,62 +85,50 @@ plt.show()
 # 6 interpolate 2D airfoil polar data cl
 # Directory containing the polar file
 
+alpha_values = np.linspace(0, 160, 100)
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
-path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-alpha_values = np.linspace(0, 120, 100)  # Define the range of alpha values for interpolation
+interpolated_cl, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
+interpolated_cd, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
 
-interpolated_cl, alpha_grid, blspn_grid = interpolate_cl_2d(alpha_values, polar_files_dir, path_geometry)
+# Plot the results Cl and Cd side by side
+fig = plt.figure(figsize=(20, 8))
 
-# Plot the results
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-ax.plot_surface(alpha_grid, blspn_grid, interpolated_cl, cmap='viridis')
+# Plot Cl
+ax1 = fig.add_subplot(121, projection='3d')
+ax1.plot_surface(alpha_grid, blspn_grid, interpolated_cl, cmap='viridis')
+ax1.set_xlabel("Angle of Attack (α) [degrees]")
+ax1.set_ylabel("Blade Span (r)")
+ax1.set_zlabel("Lift Coefficient (Cl)")
+ax1.set_title("Interpolated Cl as a Function of α and Blade Span")
 
-ax.set_xlabel("Angle of Attack (α) [degrees]")
-ax.set_ylabel("Blade Span (r)")
-ax.set_zlabel("Lift Coefficient (Cl)")
-ax.set_title("Interpolated Cl as a Function of α and Blade Span")
-plt.show()
+# Plot Cd
+ax2 = fig.add_subplot(122, projection='3d')
+ax2.plot_surface(alpha_grid, blspn_grid, interpolated_cd, cmap='viridis')
+ax2.set_xlabel("Angle of Attack (α) [degrees]")
+ax2.set_ylabel("Blade Span (r)")
+ax2.set_zlabel("Drag Coefficient (Cd)")
+ax2.set_title("Interpolated Cd as a Function of α and Blade Span")
 
-# 7 interpolate 2D airfoil polar data cd
-# Directory containing the polar file
-
-
-
-interpolated_cd, alpha_grid, blspn_grid = interpolate_cd_2d(alpha_values, polar_files_dir, path_geometry)
-
-# Plot the results
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-ax.plot_surface(alpha_grid, blspn_grid, interpolated_cd, cmap='viridis')
-
-ax.set_xlabel("Angle of Attack (α) [degrees]")
-ax.set_ylabel("Blade Span (r)")
-ax.set_zlabel("Drag Coefficient (Cd)")
-ax.set_title("Interpolated Cd as a Function of α and Blade Span")
+plt.tight_layout()
 plt.show()
 
 # 8. Generate tables for interpolated Cl and Cd values
 # Create a DataFrame for the interpolated Cd values
 
 # Generate the table
-cd_table = create_cd_table(interpolated_cd, alpha_values, blspn_grid[:, 0])
-
-# 9
-# Create a DataFrame for the interpolated Cl values
-# Generate the table
-cl_table = create_cl_table(interpolated_cl, alpha_values, blspn_grid[:, 0])
-
-output_dir = "./final-project-soul-finders/outputs"
+cd_table = interpolated_table(interpolated_cd, alpha_values, blspn_grid[:, 0], data_type="Cd")
+cl_table = interpolated_table(interpolated_cl, alpha_values, blspn_grid[:, 0], data_type="Cl")
+# Save the tables to CSV files
+output_dir = "./outputs"
 os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
 cd_table.to_csv(os.path.join(output_dir, "interpolated_cd_table.csv"))
 cl_table.to_csv(os.path.join(output_dir, "interpolated_cl_table.csv"))
 
+# compute sigma
+sigma = sigma_calc(r, c)
 
-sigma = sigma_calc(r, B, c)
+# 10. Compute the axial and tangential induction factors
 
-a, a_prime = compute_a_s(r, u, w, B, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100)
+a, a_prime = compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100)
 
-# Print the results
-print("Axial induction factor (a):", a)
-print("Tangential induction factor (a'):", a_prime)
+  
