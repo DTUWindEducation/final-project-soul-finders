@@ -19,10 +19,14 @@ path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
 path_operational_strategy = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
 shape_files = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
 polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
+polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 
+# 1. Load the geometry of the wind turbine blade
 #r, B, c, Ai = load_geometry(path_geometry)
 #u, a, w, P, T = load_operational_strategy(path_operational_strategy)
 # Create an object of the WindTurbineData class
+
+# Initialize the turbine data object
 turbine_data = TurbineData(path_geometry, path_operational_strategy)
 
 # Load geometry data
@@ -86,7 +90,6 @@ plt.show()
 # Directory containing the polar file
 
 alpha_values = np.linspace(0, 160, 100)
-polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 interpolated_cl, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
 interpolated_cd, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
 
