@@ -3,7 +3,7 @@ from pathlib import Path
 from io import StringIO
 import os
 import pandas as pd
-
+from scipy.interpolate import RegularGridInterpolator
 
 # 1. Load the geometry of the wind turbine blade
 def load_geometry(path_geometry):
@@ -79,10 +79,25 @@ def load_airfoil_polar(path_polar):
         return None, None, None
     
 
-# 5 . Plot the 3D airfoil shape for each chord in the shape_files
+def sigma_calc(r, c):
+    """
+    Calculate the solidity of the blade.
 
+    Parameters:
+        r (array-like): Blade span positions.
+        B (array-like): Number of blades.
+        c (array-like): Chord length.
 
-# 6. Interpolate Cl or Cd as a function of alpha and blade span using 2D interpolation
+    Returns:
+        sigma (function): Function to calculate solidity at a given radius.
+    """
+     
+    # Calculate solidity
+    r_safe = np.where(r == 0, 1e-6, r)
+    sigma = 3*c / (2 * np.pi * r_safe)
+    return sigma
+
+# 10 computing a and a'
 def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl"):
     """
     Interpolates Cl or Cd as a function of alpha and blade span using 2D interpolation.
@@ -130,55 +145,7 @@ def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
 
     return interpolated_data, alpha_grid, blspn_grid
 
-
-# 8 & 9 create a 2D table for interpolated Cl or Cd values
-def interpolated_table(interpolated_data, alpha_values, blspn_positions, data_type="Cl"):
-    """
-    Creates a 2D table for interpolated Cl or Cd values.
-
-    Parameters:
-        interpolated_data (2D array): Interpolated Cl or Cd values.
-        alpha_values (array-like): Array of alpha values.
-        blspn_positions (array-like): Array of blade span positions.
-        data_type (str): Type of data ("Cl" for lift coefficient, "Cd" for drag coefficient).
-
-    Returns:
-        pd.DataFrame: A DataFrame representing the 2D table.
-    """
-    # Create a DataFrame with blade span as rows and alpha as columns
-    table = pd.DataFrame(
-        interpolated_data,
-        index=blspn_positions,
-        columns=alpha_values
-    )
-    table.index.name = "Blade Span (r)"
-    table.columns.name = f"Angle of Attack (α) - {data_type}"
-    return table
-
-
-def sigma_calc(r, c):
-    """
-    Calculate the solidity of the blade.
-
-    Parameters:
-        r (array-like): Blade span positions.
-        B (array-like): Number of blades.
-        c (array-like): Chord length.
-
-    Returns:
-        sigma (function): Function to calculate solidity at a given radius.
-    """
-     
-    # Calculate solidity
-    r_safe = np.where(r == 0, 1e-6, r)
-    sigma = 3*c / (2 * np.pi * r_safe)
-    return sigma
-
-
-
-# 10 computing a and a'
-
-def compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100):
+def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=1e-6, max_iter=100):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
 
@@ -186,34 +153,62 @@ def compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6
         r (array-like): Blade span positions.
         u (array-like): Wind speed.
         w (float): Rotational speed.
-        B (float): Number of blades.ś
-        interpolated_cl (array-like): Interpolated lift coefficient.
-        interpolated_cd (array-like): Interpolated drag coefficient.
-        sigma (function): Solidity function.
+        a (float): Axial induction factor.
+        B (float): Number of blades.
+        alpha_values (array-like): Array of alpha values.
+        cl_data (2D array): Interpolated lift coefficient data.
+        cd_data (2D array): Interpolated drag coefficient data.
+        sigma (array-like): Solidity function.
         tolerance (float): Convergence tolerance.
         max_iter (int): Maximum number of iterations.
 
     Returns:
-        tuple: Updated values of a and a'.
+        tuple: Final values of a, a', Cl, Cd, and alpha.
     """
     # Initialize a and a' arrays
     an = np.zeros_like(r)
     an_prime = np.zeros_like(r)
-    # Interpolate w to match the shape of r
+
+    # Create interpolation functions for Cl and Cd
+    cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', bounds_error=False, fill_value=None)
+    cd_interp_func = RegularGridInterpolator((r, alpha_values), cd_data, method='linear', bounds_error=False, fill_value=None)
+
+    # Interpolate w and u to match the shape of r
     w_new = np.interp(r, np.linspace(r.min(), r.max(), len(w)), w)
-    # Interpolate u to match the shape of r
     u_new = np.interp(r, np.linspace(r.min(), r.max(), len(u)), u)
+
     for iteration in range(max_iter):
+        # Expand a and a' for vectorized calculations
         an_expanded = an[:, np.newaxis]
         an_prime_expanded = an_prime[:, np.newaxis]
-        # Compute flow angle
-        phi = np.arctan((1 - an) * u_new/ ((1 + an_prime) * w_new))
-        phi_n= phi[:, np.newaxis]  # Expand phi to shape (50, 1)
+
+        # Compute flow angle phi
+        phi = np.arctan((1 - an) * u_new / ((1 + an_prime) * w_new))
+        phi_n = phi[:, np.newaxis]  # Expand phi to shape (len(r), 1)
+
+        alpha_comp = np.zeros((len(r), len(alpha_values)))
+
+        for i in range(len(r)):
+            A_new = np.interp(r[i], np.linspace(r.min(), r.max(), len(a)), a)
+            # Compute new alpha (angle of attack) for each blade span position
+            alpha_comp[i] = phi_n[i] - (A_new + B[i])
+        
+        # Interpolate Cl and Cd for the new alpha and r
+        cl_new = np.zeros_like(alpha_comp)
+        cd_new = np.zeros_like(alpha_comp)
+        for i in range(len(r)):
+            points = np.array([[r[i], alpha] for alpha in alpha_comp[i, :]])
+            cl_new[i, :] = cl_interp_func(points)
+            cd_new[i, :] = cd_interp_func(points)
+
         # Compute lift and drag coefficients
-        Cn = interpolated_cl * np.cos(phi_n) - interpolated_cd * np.sin(phi_n)
-        Ct = interpolated_cl * np.sin(phi_n) + interpolated_cd * np.cos(phi_n)
-        sigma_n = sigma[:, np.newaxis]  # Expand sigma to shape (50, 1)
-        # Compute axial induction factor (a) and tangential induction factor (a')
+        Cn = cl_new * np.cos(phi_n) - cd_new * np.sin(phi_n)
+        Ct = cl_new * np.sin(phi_n) + cd_new * np.cos(phi_n)
+
+        # Expand sigma for vectorized calculations
+        sigma_n = sigma[:, np.newaxis]
+
+        # Compute new a and a'
         a_new = 1 / (4 * (np.sin(phi_n) ** 2) / (sigma_n * Cn) + 1)
         a_prime_new = 1 / (4 * np.sin(phi_n) * np.cos(phi_n) / (sigma_n * Ct) - 1)
 
@@ -225,16 +220,29 @@ def compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6
         an = a_new[:, 0]
         an_prime = a_prime_new[:, 0]
 
-    return an, an_prime
+    return an, an_prime, cl_new, cd_new, alpha_comp, B, phi_n, A_new
 
 
-##### concerns ####
-"""
-1. where should I and why calculate the step 3 for alpha angle
+# 8 & 9 create a 2D table for interpolated Cl or Cd values
+def interpolated_table(interpolated_data, alpha_values, r, data_type="cl_new"):
+    """
+    Creates a 2D table for interpolated Cl or Cd values.
+    """
+    interpolated_data = np.array(interpolated_data)
+    if interpolated_data.ndim != 2:
+        raise ValueError("Interpolated data must be a 2D array.")
 
+    if interpolated_data.shape != (len(r), len(alpha_values)):
+        raise ValueError(
+            "Dimensions of interpolated_data do not match blade span and alpha values."
+        )
 
-2. in computeing the a and a' i have used interpolated w and u with retrospect to r is that alright 
+    table = pd.DataFrame(
+        interpolated_data,
+        index=r,
+        columns=alpha_values
+    )
+    table.index.name = "Blade Span (r)"
+    table.columns.name = f"Angle of Attack (α) - {data_type}"
+    return table
 
-
-
-"""

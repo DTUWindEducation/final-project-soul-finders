@@ -1,18 +1,17 @@
-from turbine import TurbineData
-from __init__ import load_geometry
-from __init__ import load_operational_strategy
-from __init__ import load_airfoil_shape
-from __init__ import load_airfoil_polar
-from __init__ import interpolate_2d
-from __init__ import interpolated_table
-from __init__ import compute_a_s
-from __init__ import sigma_calc
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate as interp
 from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
+from turbine import TurbineData
+from __init__ import load_airfoil_shape
+from __init__ import load_airfoil_polar
+from __init__ import interpolate_2d
+from __init__ import interpolated_table
+from __init__ import compute_a_s
+from __init__ import sigma_calc
+
 
 
 path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
@@ -22,21 +21,20 @@ polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 
 # 1. Load the geometry of the wind turbine blade
-#r, B, c, Ai = load_geometry(path_geometry)
-#u, a, w, P, T = load_operational_strategy(path_operational_strategy)
 # Create an object of the WindTurbineData class
 
 # Initialize the turbine data object
 turbine_data = TurbineData(path_geometry, path_operational_strategy)
-
 # Load geometry data
 geometry = turbine_data.load_geometry()
+r, B, c, Ai = geometry['r'], geometry['B'], geometry['c'], geometry['Ai']
+print("twist",B)
 
 
 # Load operational strategy data
 operational_strategy = turbine_data.load_operational_strategy()
-
-
+u, a, w, P, T = operational_strategy['u'], operational_strategy['a'], operational_strategy['w'], operational_strategy['P'], operational_strategy['T']
+print("pitch",a)
 
 # 3. Load the airfoil shape
 
@@ -85,53 +83,60 @@ ax.set_zlim(0,170)
 plt.legend()
 plt.show()
 
+alpha_values = np.linspace(-180, 180, 100)  # Define alpha range
+cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
+cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
+sigma = sigma_calc(r, c)
 
-# 6 interpolate 2D airfoil polar data cl
-# Directory containing the polar file
+an, an_prime, cl_new, cd_new, alpha_comp, B, phi_n, A_new= compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma)
 
-alpha_values = np.linspace(0, 160, 100)
-interpolated_cl, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
-interpolated_cd, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
+print("alpha_comp", alpha_comp)
 
-# Plot the results Cl and Cd side by side
-fig = plt.figure(figsize=(20, 8))
+# Convert alpha_comp to a DataFrame for saving as a table
+alpha_comp_df = pd.DataFrame(alpha_comp)
 
-# Plot Cl
+# Save the DataFrame to a CSV file
+output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs"
+alpha_comp_df.to_csv(f"{output_folder}/alpha_comp1.csv", index=False)
+
+
+cl_table = interpolated_table(cl_new, alpha_comp[0, :], r, data_type="cl_new")
+cd_table = interpolated_table(cd_new, alpha_comp[0, :], r, data_type="cd_new")
+
+
+
+# Save to CSV
+cl_table.to_csv("cl_table.csv")
+cd_table.to_csv("cd_table.csv")
+output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs"
+
+# Save the tables to the specified output folder
+cl_table.to_csv(f"{output_folder}/cl_table.csv")
+cd_table.to_csv(f"{output_folder}/cd_table.csv")
+
+# 6. Plot the Cl and Cd values in 3D plots as subplots in the same figure
+fig = plt.figure(figsize=(16, 8))
+
+# Create 2D grids for r and alpha_comp
+r_grid, alpha_grid = np.meshgrid(r, alpha_comp[0, :], indexing='ij')
+
+# First subplot for Cl
 ax1 = fig.add_subplot(121, projection='3d')
-ax1.plot_surface(alpha_grid, blspn_grid, interpolated_cl, cmap='viridis')
-ax1.set_xlabel("Angle of Attack (α) [degrees]")
+ax1.plot_surface(alpha_grid, r_grid, cl_new, cmap='viridis')
+ax1.set_xlabel("Alpha (degrees)")
 ax1.set_ylabel("Blade Span (r)")
-ax1.set_zlabel("Lift Coefficient (Cl)")
-ax1.set_title("Interpolated Cl as a Function of α and Blade Span")
+ax1.set_zlabel("Cl")
+ax1.set_title("Cl Values in 3D")
 
-# Plot Cd
+# Second subplot for Cd
 ax2 = fig.add_subplot(122, projection='3d')
-ax2.plot_surface(alpha_grid, blspn_grid, interpolated_cd, cmap='viridis')
-ax2.set_xlabel("Angle of Attack (α) [degrees]")
+ax2.plot_surface(alpha_grid, r_grid, cd_new, cmap='viridis')
+ax2.set_xlabel("Alpha (degrees)")
 ax2.set_ylabel("Blade Span (r)")
-ax2.set_zlabel("Drag Coefficient (Cd)")
-ax2.set_title("Interpolated Cd as a Function of α and Blade Span")
+ax2.set_zlabel("Cd")
+ax2.set_title("Cd Values in 3D")
 
 plt.tight_layout()
 plt.show()
 
-# 8. Generate tables for interpolated Cl and Cd values
-# Create a DataFrame for the interpolated Cd values
 
-# Generate the table
-cd_table = interpolated_table(interpolated_cd, alpha_values, blspn_grid[:, 0], data_type="Cd")
-cl_table = interpolated_table(interpolated_cl, alpha_values, blspn_grid[:, 0], data_type="Cl")
-# Save the tables to CSV files
-output_dir = "./outputs"
-os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
-cd_table.to_csv(os.path.join(output_dir, "interpolated_cd_table.csv"))
-cl_table.to_csv(os.path.join(output_dir, "interpolated_cl_table.csv"))
-
-# compute sigma
-sigma = sigma_calc(r, c)
-
-# 10. Compute the axial and tangential induction factors
-
-a, a_prime = compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100)
-
-  
