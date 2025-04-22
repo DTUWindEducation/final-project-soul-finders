@@ -1,18 +1,18 @@
-from turbine import TurbineData
-from __init__ import load_geometry
-from __init__ import load_operational_strategy
-from __init__ import load_airfoil_shape
-from __init__ import load_airfoil_polar
-from __init__ import interpolate_2d
-from __init__ import interpolated_table
-from __init__ import compute_a_s
-from __init__ import sigma_calc
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate as interp
 from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
+from turbine import TurbineData
+from __init__ import load_airfoil_shape
+from __init__ import load_airfoil_polar
+from __init__ import interpolate_2d
+from __init__ import create_2d_table
+from __init__ import compute_a_s
+from __init__ import sigma_calc
+from __init__ import calculate_rotor_parameters
+
 
 
 path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
@@ -22,20 +22,19 @@ polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 
 # 1. Load the geometry of the wind turbine blade
-#r, B, c, Ai = load_geometry(path_geometry)
-#u, a, w, P, T = load_operational_strategy(path_operational_strategy)
 # Create an object of the WindTurbineData class
 
 # Initialize the turbine data object
 turbine_data = TurbineData(path_geometry, path_operational_strategy)
-
 # Load geometry data
 geometry = turbine_data.load_geometry()
+r, B, c, Ai = geometry['r'], geometry['B'], geometry['c'], geometry['Ai']
+
 
 
 # Load operational strategy data
 operational_strategy = turbine_data.load_operational_strategy()
-
+u, a, w, P, T = operational_strategy['u'], operational_strategy['a'], operational_strategy['w'], operational_strategy['P'], operational_strategy['T']
 
 
 # 3. Load the airfoil shape
@@ -83,55 +82,107 @@ z_padding = (z_max - z_min) * 0.00000002  # Add 20% padding
 ax.set_zlim(0,170)
 
 plt.legend()
-plt.show()
+#plt.show()
+
+alpha_values = np.linspace(-180, 180, 100)  # Define alpha range
+cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
+cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
+alpha_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="alpha")
+sigma = sigma_calc(r, c)
+
+print("cl_data shape:", cl_data.shape)
+print("r shape:", r.shape)
+print("alpha_values shape:", alpha_values.shape)
+
+# Call the function
+cl_new, cd_new, alpha_comp, an, an_prime = compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma)
+
+print("\nDebug information:")
+print(f"Alpha range at r={r[0]:.2f}m: {alpha_comp[0,:].min():.2f} to {alpha_comp[0,:].max():.2f}")
+print(f"Alpha range at r={r[-1]:.2f}m: {alpha_comp[-1,:].min():.2f} to {alpha_comp[-1,:].max():.2f}")
+print(f"Cl range: {cl_new.min():.2f} to {cl_new.max():.2f}")
+print(f"Cd range: {cd_new.min():.2f} to {cd_new.max():.2f}")
+
+#create a table for alpha values 
+alpha_table = pd.DataFrame(alpha_comp, columns=[f"Alpha_{i}" for i in range(len(alpha_comp[0]))])
+output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
+os.makedirs(output_folder, exist_ok=True)
+alpha_table.to_csv(os.path.join(output_folder, "alpha_table.csv"), index=False)
+
+# Generate 2D tables for Cl and Cd
+# Replace these lines:
+# ...existing code...
+# Generate 2D tables for Cl and Cd
+cl_table, cl_stats = create_2d_table(cl_new, alpha_comp, r, data_type="Cl")
+cd_table, cd_stats = create_2d_table(cd_new, alpha_comp, r, data_type="Cd")
 
 
-# 6 interpolate 2D airfoil polar data cl
-# Directory containing the polar file
 
-alpha_values = np.linspace(0, 160, 100)
-interpolated_cl, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
-interpolated_cd, alpha_grid, blspn_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
+# Create output directory if it doesn't exist
+output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
+os.makedirs(output_folder, exist_ok=True)
 
-# Plot the results Cl and Cd side by side
-fig = plt.figure(figsize=(20, 8))
+# Save the tables and stats to CSV files
+cl_table.to_csv(os.path.join(output_folder, "cl_table.csv"))
+cd_table.to_csv(os.path.join(output_folder, "cd_table.csv"))
 
-# Plot Cl
+
+print(f"Tables saved to {output_folder}")
+
+
+# 6. Plot the Cl and Cd values in 3D plots as subplots in the same figure
+fig = plt.figure(figsize=(16, 8))
+
+# Create 2D grids for r and alpha_comp
+r_grid, alpha_grid = np.meshgrid(r, alpha_comp[0, :], indexing='ij')
+
+# First subplot for Cl
 ax1 = fig.add_subplot(121, projection='3d')
-ax1.plot_surface(alpha_grid, blspn_grid, interpolated_cl, cmap='viridis')
-ax1.set_xlabel("Angle of Attack (α) [degrees]")
+ax1.plot_surface(alpha_grid, r_grid, cl_new, cmap='viridis')
+ax1.set_xlabel("Alpha (degrees)")
 ax1.set_ylabel("Blade Span (r)")
-ax1.set_zlabel("Lift Coefficient (Cl)")
-ax1.set_title("Interpolated Cl as a Function of α and Blade Span")
+ax1.set_zlabel("Cl")
+ax1.set_title("Cl Values in 3D")
 
-# Plot Cd
+# Second subplot for Cd
 ax2 = fig.add_subplot(122, projection='3d')
-ax2.plot_surface(alpha_grid, blspn_grid, interpolated_cd, cmap='viridis')
-ax2.set_xlabel("Angle of Attack (α) [degrees]")
+ax2.plot_surface(alpha_grid, r_grid, cd_new, cmap='viridis')
+ax2.set_xlabel("Alpha (degrees)")
 ax2.set_ylabel("Blade Span (r)")
-ax2.set_zlabel("Drag Coefficient (Cd)")
-ax2.set_title("Interpolated Cd as a Function of α and Blade Span")
+ax2.set_zlabel("Cd")
+ax2.set_title("Cd Values in 3D")
 
 plt.tight_layout()
 plt.show()
 
-# 8. Generate tables for interpolated Cl and Cd values
-# Create a DataFrame for the interpolated Cd values
+rotor_params = calculate_rotor_parameters(r, an, an_prime, rho=1.225)
 
-# Generate the table
-cd_table = interpolated_table(interpolated_cd, alpha_values, blspn_grid[:, 0], data_type="Cd")
-cl_table = interpolated_table(interpolated_cl, alpha_values, blspn_grid[:, 0], data_type="Cl")
-# Save the tables to CSV files
-output_dir = "./outputs"
-os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
-cd_table.to_csv(os.path.join(output_dir, "interpolated_cd_table.csv"))
-cl_table.to_csv(os.path.join(output_dir, "interpolated_cl_table.csv"))
+# Print results
 
-# compute sigma
-sigma = sigma_calc(r, c)
+print("\nRotor Parameters:")
+print(f"Thrust (T): {rotor_params['thrust']/1000:.2f} kN")
+print(f"Torque (M): {rotor_params['torque']/1000:.2f} kNm")
+print(f"Power (P): {rotor_params['power']/1000:.2f} kW")
+print(f"Thrust Coefficient (CT): {rotor_params['thrust_coefficient']:.3f}")
+print(f"Power Coefficient (CP): {rotor_params['power_coefficient']:.3f}")
 
-# 10. Compute the axial and tangential induction factors
+# Plot thrust and torque distribution
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-a, a_prime = compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100)
+# Plot differential thrust
+r_mid = (r[1:] + r[:-1]) / 2
+ax1.plot(r_mid, rotor_params['dT']/1000, 'b-')
+ax1.set_xlabel('Blade span [m]')
+ax1.set_ylabel('dT [kN]')
+ax1.set_title('Thrust Distribution')
+ax1.grid(True)
 
-  
+# Plot differential torque
+ax2.plot(r_mid, rotor_params['dM']/1000, 'r-')
+ax2.set_xlabel('Blade span [m]')
+ax2.set_ylabel('dM [kNm]')
+ax2.set_title('Torque Distribution')
+ax2.grid(True)
+
+plt.tight_layout()
+plt.show()

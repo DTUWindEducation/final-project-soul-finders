@@ -3,7 +3,7 @@ from pathlib import Path
 from io import StringIO
 import os
 import pandas as pd
-
+from scipy.interpolate import RegularGridInterpolator
 
 # 1. Load the geometry of the wind turbine blade
 def load_geometry(path_geometry):
@@ -79,83 +79,6 @@ def load_airfoil_polar(path_polar):
         return None, None, None
     
 
-# 5 . Plot the 3D airfoil shape for each chord in the shape_files
-
-
-# 6. Interpolate Cl or Cd as a function of alpha and blade span using 2D interpolation
-def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl"):
-    """
-    Interpolates Cl or Cd as a function of alpha and blade span using 2D interpolation.
-
-    Parameters:
-        alpha_values (array-like): Array of alpha values to interpolate.
-        polar_files_dir (str): Directory containing the polar files.
-        path_geometry (str): Path to the blade geometry file.
-        data_type (str): Type of data to interpolate ("cl" for lift coefficient, "cd" for drag coefficient).
-
-    Returns:
-        interpolated_data (2D array): Interpolated Cl or Cd values for the given alpha and blade span.
-        alpha_grid (2D array): Grid of alpha values used for interpolation.
-        blspn_grid (2D array): Grid of blade span values used for interpolation.
-    """
-    # Load blade span data
-    r, _, _, _ = load_geometry(path_geometry)
-
-    # Initialize storage for data
-    data_list = []
-    blspn_positions = []
-
-    # Loop through polar files and extract data
-    for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
-        file_path = os.path.join(polar_files_dir, file_name)
-        if os.path.isfile(file_path) and file_name.endswith(".dat"):
-            alpha, cl, cd = load_airfoil_polar(file_path)
-            data = cl if data_type == "cl" else cd  # Select Cl or Cd based on data_type
-            data_list.append(data)
-            if i < len(r):  # Ensure `i` does not exceed the length of `r`
-                blspn_positions.append(r[i])  # Associate polar file with corresponding blade span position
-            else:
-                print(f"Warning: No blade span position for polar file {file_name}")
-
-    # Create a grid for alpha and blade span
-    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions)
-
-    # Initialize the interpolated_data array with the correct shape
-    interpolated_data = np.zeros((len(blspn_positions), len(alpha_values)))
-
-    # Interpolate data values
-    for i, data in enumerate(data_list):
-        interp_func = np.interp(alpha_values, alpha, data)  # 1D interpolation for each blade span
-        interpolated_data[i, :] = interp_func
-
-    return interpolated_data, alpha_grid, blspn_grid
-
-
-# 8 & 9 create a 2D table for interpolated Cl or Cd values
-def interpolated_table(interpolated_data, alpha_values, blspn_positions, data_type="Cl"):
-    """
-    Creates a 2D table for interpolated Cl or Cd values.
-
-    Parameters:
-        interpolated_data (2D array): Interpolated Cl or Cd values.
-        alpha_values (array-like): Array of alpha values.
-        blspn_positions (array-like): Array of blade span positions.
-        data_type (str): Type of data ("Cl" for lift coefficient, "Cd" for drag coefficient).
-
-    Returns:
-        pd.DataFrame: A DataFrame representing the 2D table.
-    """
-    # Create a DataFrame with blade span as rows and alpha as columns
-    table = pd.DataFrame(
-        interpolated_data,
-        index=blspn_positions,
-        columns=alpha_values
-    )
-    table.index.name = "Blade Span (r)"
-    table.columns.name = f"Angle of Attack (α) - {data_type}"
-    return table
-
-
 def sigma_calc(r, c):
     """
     Calculate the solidity of the blade.
@@ -174,67 +97,277 @@ def sigma_calc(r, c):
     sigma = 3*c / (2 * np.pi * r_safe)
     return sigma
 
-
-
 # 10 computing a and a'
+def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl"):
+    """
+    Interpolates Cl or Cd as a function of alpha and blade span.
+    Returns data with shape (len(r), len(alpha_values))
+    """
+    # Load blade span data
+    r, _, _, _ = load_geometry(path_geometry)
 
-def compute_a_s(r, u, w, interpolated_cl, interpolated_cd, sigma, tolerance=1e-6, max_iter=100):
+    # Initialize storage for data
+    polar_data = []
+    alpha_data = []
+    blspn_positions = []
+
+    # Loop through polar files and extract data
+    for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
+        file_path = os.path.join(polar_files_dir, file_name)
+        if os.path.isfile(file_path) and file_name.endswith(".dat"):
+            alpha, cl, cd = load_airfoil_polar(file_path)
+            data = cl if data_type == "cl" else cd
+            
+            # Store the data for this airfoil section
+            polar_data.append(data)
+            alpha_data.append(alpha)
+            if i < len(r):
+                blspn_positions.append(r[i])
+
+    # Convert lists to numpy arrays and ensure same length as r
+    blspn_positions = np.array(blspn_positions)
+    
+    # Initialize the interpolated data array with the correct shape (r, alpha)
+    interpolated_data = np.zeros((len(blspn_positions), len(alpha_values)))
+
+    # Interpolate for each blade section
+    for i, (alpha_section, data_section) in enumerate(zip(alpha_data, polar_data)):
+        # Sort alpha and data to ensure proper interpolation
+        sort_idx = np.argsort(alpha_section)
+        alpha_section = alpha_section[sort_idx]
+        data_section = data_section[sort_idx]
+        
+        # Remove any duplicate alpha values
+        unique_idx = np.unique(alpha_section, return_index=True)[1]
+        alpha_section = alpha_section[unique_idx]
+        data_section = data_section[unique_idx]
+        
+        # Perform interpolation for this section
+        interpolated_values = np.interp(
+            alpha_values,
+            alpha_section,
+            data_section,
+            left=data_section[0],    # Use first value for extrapolation
+            right=data_section[-1]   # Use last value for extrapolation
+        )
+        
+        # Store the interpolated values (notice we store in rows now)
+        interpolated_data[i, :] = interpolated_values
+
+    # Create meshgrid for output
+    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions)
+
+    return interpolated_data, alpha_grid, blspn_grid
+
+def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=1e-6, max_iter=100):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
-
-    Parameters:
-        r (array-like): Blade span positions.
-        u (array-like): Wind speed.
-        w (float): Rotational speed.
-        B (float): Number of blades.ś
-        interpolated_cl (array-like): Interpolated lift coefficient.
-        interpolated_cd (array-like): Interpolated drag coefficient.
-        sigma (function): Solidity function.
-        tolerance (float): Convergence tolerance.
-        max_iter (int): Maximum number of iterations.
-
-    Returns:
-        tuple: Updated values of a and a'.
     """
+    # Ensure r and alpha_values are strictly ascending and unique
+    r = np.unique(r)
+    alpha_values = np.unique(alpha_values)
+
+    # Ensure B is a NumPy array and matches r's shape
+    B = np.array(B)
+    if len(B) != len(r):
+        raise ValueError(f"B shape {B.shape} does not match r shape {r.shape}")
+
     # Initialize a and a' arrays
     an = np.zeros_like(r)
     an_prime = np.zeros_like(r)
-    # Interpolate w to match the shape of r
-    w_new = np.interp(r, np.linspace(r.min(), r.max(), len(w)), w)
-    # Interpolate u to match the shape of r
-    u_new = np.interp(r, np.linspace(r.min(), r.max(), len(u)), u)
-    for iteration in range(max_iter):
-        an_expanded = an[:, np.newaxis]
-        an_prime_expanded = an_prime[:, np.newaxis]
-        # Compute flow angle
-        phi = np.arctan((1 - an) * u_new/ ((1 + an_prime) * w_new))
-        phi_n= phi[:, np.newaxis]  # Expand phi to shape (50, 1)
-        # Compute lift and drag coefficients
-        Cn = interpolated_cl * np.cos(phi_n) - interpolated_cd * np.sin(phi_n)
-        Ct = interpolated_cl * np.sin(phi_n) + interpolated_cd * np.cos(phi_n)
-        sigma_n = sigma[:, np.newaxis]  # Expand sigma to shape (50, 1)
-        # Compute axial induction factor (a) and tangential induction factor (a')
-        a_new = 1 / (4 * (np.sin(phi_n) ** 2) / (sigma_n * Cn) + 1)
-        a_prime_new = 1 / (4 * np.sin(phi_n) * np.cos(phi_n) / (sigma_n * Ct) - 1)
 
-        # Check for convergence
-        if np.all(np.abs(a_new - an_expanded) < tolerance) and np.all(np.abs(a_prime_new - an_prime_expanded) < tolerance):
+    # Constants
+    w_new = 6.93 # rad/s
+    u_new = 9
+    A_new = 0.000535
+
+    # Create interpolation functions
+    cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', 
+                                            bounds_error=False, fill_value=None)
+    cd_interp_func = RegularGridInterpolator((r, alpha_values), cd_data, method='linear', 
+                                            bounds_error=False, fill_value=None)
+
+    # Initialize storage for Cl and Cd
+    cl_new = np.zeros((len(r), len(alpha_values)))
+    cd_new = np.zeros((len(r), len(alpha_values)))
+    alpha_comp = np.zeros((len(r), len(alpha_values)))
+
+    for iteration in range(max_iter):
+        # Compute flow angle phi for each r
+        phi = np.arctan((1 - an) * u_new / ((1 + an_prime) * w_new))
+        phi_d = np.degrees(phi) 
+        # Create alpha_comp with correct broadcasting
+        alpha_comp = np.zeros((len(r), len(alpha_values)))
+        for i in range(len(r)):
+            alpha_comp[:,i]  = phi_d[i] - (A_new + B[i])
+
+        # Create meshgrid for interpolation
+        r_grid, alpha_grid = np.meshgrid(r, alpha_values, indexing='ij')
+        
+        # Ensure all arrays have correct shapes before stacking
+        r_points = r_grid.flatten()
+        alpha_points = alpha_comp.flatten()
+        
+        if len(r_points) != len(alpha_points):
+            raise ValueError(f"Dimension mismatch: r_points ({len(r_points)}) != alpha_points ({len(alpha_points)})")
+            
+        points = np.column_stack((r_points, alpha_points))
+
+        # Interpolate Cl and Cd
+        cl_new = cl_interp_func(points).reshape(len(r), len(alpha_values))
+        cd_new = cd_interp_func(points).reshape(len(r), len(alpha_values))
+
+        # Compute normal and tangential coefficients
+        Cn = cl_new * np.cos(phi_d[:, np.newaxis]) - cd_new * np.sin(phi_d[:, np.newaxis])
+        Ct = cl_new * np.sin(phi_d[:, np.newaxis]) + cd_new * np.cos(phi_d[:, np.newaxis])
+
+        # Compute new induction factors
+        a_new = 1 / (4 * (np.sin(phi_d[:, np.newaxis]) ** 2) / (sigma[:, np.newaxis] * Cn) + 1)
+        a_prime_new = 1 / (4 * np.sin(phi_d[:, np.newaxis]) * np.cos(phi_d[:, np.newaxis]) / 
+                          (sigma[:, np.newaxis] * Ct) - 1)
+
+        # Check convergence
+        if (np.all(np.abs(a_new - an[:, np.newaxis]) < tolerance) and 
+            np.all(np.abs(a_prime_new - an_prime[:, np.newaxis]) < tolerance)):
             break
 
-        # Update a and a'
+        # Update values for next iteration
         an = a_new[:, 0]
         an_prime = a_prime_new[:, 0]
 
-    return an, an_prime
+    return cl_new, cd_new, alpha_comp, an, an_prime
 
+def create_2d_table(data, alpha_comp, r, data_type="Cl"):
+    """
+    Create a 2D pandas DataFrame for Cl or Cd values with segregated alpha ranges.
+    
+    Parameters:
+        data (numpy.ndarray): 2D array of shape (n_span, n_alpha) with Cl or Cd values
+        alpha_comp (numpy.ndarray): 2D array of shape (n_span, n_alpha) with angle of attack values
+        r (numpy.ndarray): Array of blade span positions
+        data_type (str): Type of data ("Cl" or "Cd")
+    
+    Returns:
+        pandas.DataFrame: 2D table with r values as rows and computed alpha values as columns
+    """
+    # Verify shapes
+    if data.shape != alpha_comp.shape:
+        raise ValueError(f"Data shape {data.shape} doesn't match alpha_comp shape {alpha_comp.shape}")
+    if len(r) != data.shape[0]:
+        raise ValueError(f"Number of span positions {len(r)} doesn't match data rows {data.shape[0]}")
+    
+    # Analyze alpha distribution for each span position
+    alpha_stats = pd.DataFrame(index=r, columns=['min', 'max', 'mean', 'std'])
+    for i, r_val in enumerate(r):
+        alpha_stats.loc[r_val] = {
+            'min': alpha_comp[i,:].min(),
+            'max': alpha_comp[i,:].max(),
+            'mean': alpha_comp[i,:].mean(),
+            'std': alpha_comp[i,:].std()
+        }
+    
+    # Create adaptive bins based on alpha distribution
+    overall_min = alpha_stats['min'].min()
+    overall_max = alpha_stats['max'].max()
+    std_mean = alpha_stats['std'].mean()
+    
+    # Create bins with finer resolution where alpha values are concentrated
+    bin_width = min(0.5, std_mean / 2)  # Adaptive bin width
+    alpha_bins = np.arange(overall_min - bin_width, 
+                          overall_max + bin_width, 
+                          bin_width)
+    
+    # Initialize DataFrame
+    df = pd.DataFrame(index=r, columns=alpha_bins[:-1])
+    
+    # Fill the DataFrame using binning approach
+    for i, r_val in enumerate(r):
+        # Get alpha values and corresponding data for this span position
+        alphas = alpha_comp[i, :]
+        values = data[i, :]
+        
+        # Sort alpha values and corresponding data
+        sort_idx = np.argsort(alphas)
+        alphas = alphas[sort_idx]
+        values = values[sort_idx]
+        
+        # Create bins and compute mean values in each bin
+        indices = np.digitize(alphas, alpha_bins) - 1
+        for j in range(len(alpha_bins) - 1):
+            mask = indices == j
+            if np.any(mask):
+                df.loc[r_val, alpha_bins[j]] = np.mean(values[mask])
+            else:
+                df.loc[r_val, alpha_bins[j]] = np.nan
+    
+    # Remove columns with all NaN values
+    df = df.dropna(axis=1, how='all')
+    
+    # Add alpha statistics as additional columns
+    df = pd.concat([df, alpha_stats], axis=1)
+    
+    # Set index and column names
+    df.index.name = 'Blade span [m]'
+    df.columns.name = 'Angle of attack [deg]'
+    
 
-##### concerns ####
-"""
-1. where should I and why calculate the step 3 for alpha angle
+    return df, alpha_stats
 
+def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
+    """
+    Calculate thrust, torque, power and their coefficients.
+    
+    Parameters:
+        r (array): Blade span positions [m]
+        an (array): Axial induction factors
+        an_prime (array): Tangential induction factors
+        rho (float): Air density [kg/m^3]
+    
+    Returns:
+        dict: Dictionary containing rotor parameters
+    """
+    w_new = 6.93  # rad/s
+    u_new = 9.0   # m/s
 
-2. in computeing the a and a' i have used interpolated w and u with retrospect to r is that alright 
-
-
-
-"""
+    # Ensure positive induction factors and slice to match r_mid length
+    an = np.abs(an[:-1])  # Take absolute value and slice
+    an_prime = an_prime[:-1]  # Slice to match length
+    
+    # Calculate differential elements
+    dr = np.diff(r)  # Distance between elements
+    r_mid = (r[1:] + r[:-1]) / 2  # Midpoints for integration
+    
+   
+    
+    # Calculate differential thrust and torque for each element
+    dT = 4 * np.pi * r_mid * rho * (u_new ** 2) * an * (1 - an) * dr
+    dM = 4 * np.pi * (r_mid ** 3) * rho * u_new * w_new * an_prime * (1 - an) * dr
+    
+    # Integrate to get total thrust and torque
+    T = np.sum(dT)  # Total thrust [N]
+    M = np.sum(dM)  # Total torque [Nm]
+    
+    # Calculate power
+    P = M * w_new  # Power [W]
+    
+    # Calculate rotor area
+    R = 120  # Rotor radius [m]
+    A = np.pi * R**2  # Rotor area [m^2]
+    
+    # Calculate coefficients
+    CT = T / (0.5 * rho * A * u_new**2)  # Thrust coefficient [-]
+    CP = P / (0.5 * rho * A * u_new**3)  # Power coefficient [-]
+    
+   
+    
+    return {
+        'thrust': T,
+        'torque': M,
+        'power': P,
+        'thrust_coefficient': CT,
+        'power_coefficient': CP,
+        'rotor_area': A,
+        'dT': dT,
+        'dM': dM,
+        
+    }
