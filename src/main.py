@@ -11,6 +11,7 @@ from __init__ import interpolate_2d
 from __init__ import create_2d_table
 from __init__ import compute_a_s
 from __init__ import sigma_calc
+from __init__ import calculate_rotor_parameters
 
 
 
@@ -154,4 +155,34 @@ ax2.set_title("Cd Values in 3D")
 plt.tight_layout()
 plt.show()
 
+rotor_params = calculate_rotor_parameters(r, an, an_prime, rho=1.225)
 
+# Print results
+
+print("\nRotor Parameters:")
+print(f"Thrust (T): {rotor_params['thrust']/1000:.2f} kN")
+print(f"Torque (M): {rotor_params['torque']/1000:.2f} kNm")
+print(f"Power (P): {rotor_params['power']/1000:.2f} kW")
+print(f"Thrust Coefficient (CT): {rotor_params['thrust_coefficient']:.3f}")
+print(f"Power Coefficient (CP): {rotor_params['power_coefficient']:.3f}")
+
+# Plot thrust and torque distribution
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+# Plot differential thrust
+r_mid = (r[1:] + r[:-1]) / 2
+ax1.plot(r_mid, rotor_params['dT']/1000, 'b-')
+ax1.set_xlabel('Blade span [m]')
+ax1.set_ylabel('dT [kN]')
+ax1.set_title('Thrust Distribution')
+ax1.grid(True)
+
+# Plot differential torque
+ax2.plot(r_mid, rotor_params['dM']/1000, 'r-')
+ax2.set_xlabel('Blade span [m]')
+ax2.set_ylabel('dM [kNm]')
+ax2.set_title('Torque Distribution')
+ax2.grid(True)
+
+plt.tight_layout()
+plt.show()

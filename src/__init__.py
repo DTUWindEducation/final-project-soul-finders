@@ -177,7 +177,7 @@ def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=
     an_prime = np.zeros_like(r)
 
     # Constants
-    w_new = 6.93
+    w_new = 6.93 # rad/s
     u_new = 9
     A_new = 0.000535
 
@@ -310,5 +310,64 @@ def create_2d_table(data, alpha_comp, r, data_type="Cl"):
     df.index.name = 'Blade span [m]'
     df.columns.name = 'Angle of attack [deg]'
     
+
     return df, alpha_stats
 
+def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
+    """
+    Calculate thrust, torque, power and their coefficients.
+    
+    Parameters:
+        r (array): Blade span positions [m]
+        an (array): Axial induction factors
+        an_prime (array): Tangential induction factors
+        rho (float): Air density [kg/m^3]
+    
+    Returns:
+        dict: Dictionary containing rotor parameters
+    """
+    w_new = 6.93  # rad/s
+    u_new = 9.0   # m/s
+
+    # Ensure positive induction factors and slice to match r_mid length
+    an = np.abs(an[:-1])  # Take absolute value and slice
+    an_prime = an_prime[:-1]  # Slice to match length
+    
+    # Calculate differential elements
+    dr = np.diff(r)  # Distance between elements
+    r_mid = (r[1:] + r[:-1]) / 2  # Midpoints for integration
+    
+   
+    
+    # Calculate differential thrust and torque for each element
+    dT = 4 * np.pi * r_mid * rho * (u_new ** 2) * an * (1 - an) * dr
+    dM = 4 * np.pi * (r_mid ** 3) * rho * u_new * w_new * an_prime * (1 - an) * dr
+    
+    # Integrate to get total thrust and torque
+    T = np.sum(dT)  # Total thrust [N]
+    M = np.sum(dM)  # Total torque [Nm]
+    
+    # Calculate power
+    P = M * w_new  # Power [W]
+    
+    # Calculate rotor area
+    R = 117  # Rotor radius [m]
+    A = np.pi * R**2  # Rotor area [m^2]
+    
+    # Calculate coefficients
+    CT = T / (0.5 * rho * A * u_new**2)  # Thrust coefficient [-]
+    CP = P / (0.5 * rho * A * u_new**3)  # Power coefficient [-]
+    
+   
+    
+    return {
+        'thrust': T,
+        'torque': M,
+        'power': P,
+        'thrust_coefficient': CT,
+        'power_coefficient': CP,
+        'rotor_area': A,
+        'dT': dT,
+        'dM': dM,
+        
+    }
