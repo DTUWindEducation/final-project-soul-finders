@@ -100,24 +100,15 @@ def sigma_calc(r, c):
 # 10 computing a and a'
 def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl"):
     """
-    Interpolates Cl or Cd as a function of alpha and blade span using 2D interpolation.
-
-    Parameters:
-        alpha_values (array-like): Array of alpha values to interpolate.
-        polar_files_dir (str): Directory containing the polar files.
-        path_geometry (str): Path to the blade geometry file.
-        data_type (str): Type of data to interpolate ("cl" for lift coefficient, "cd" for drag coefficient).
-
-    Returns:
-        interpolated_data (2D array): Interpolated Cl or Cd values for the given alpha and blade span.
-        alpha_grid (2D array): Grid of alpha values used for interpolation.
-        blspn_grid (2D array): Grid of blade span values used for interpolation.
+    Interpolates Cl or Cd as a function of alpha and blade span.
+    Returns data with shape (len(r), len(alpha_values))
     """
     # Load blade span data
     r, _, _, _ = load_geometry(path_geometry)
 
     # Initialize storage for data
-    data_list = []
+    polar_data = []
+    alpha_data = []
     blspn_positions = []
 
     # Loop through polar files and extract data
@@ -125,124 +116,199 @@ def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
         file_path = os.path.join(polar_files_dir, file_name)
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
             alpha, cl, cd = load_airfoil_polar(file_path)
-            data = cl if data_type == "cl" else cd  # Select Cl or Cd based on data_type
-            data_list.append(data)
-            if i < len(r):  # Ensure `i` does not exceed the length of `r`
-                blspn_positions.append(r[i])  # Associate polar file with corresponding blade span position
-            else:
-                print(f"Warning: No blade span position for polar file {file_name}")
+            data = cl if data_type == "cl" else cd
+            
+            # Store the data for this airfoil section
+            polar_data.append(data)
+            alpha_data.append(alpha)
+            if i < len(r):
+                blspn_positions.append(r[i])
 
-    # Create a grid for alpha and blade span
-    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions)
-
-    # Initialize the interpolated_data array with the correct shape
+    # Convert lists to numpy arrays and ensure same length as r
+    blspn_positions = np.array(blspn_positions)
+    
+    # Initialize the interpolated data array with the correct shape (r, alpha)
     interpolated_data = np.zeros((len(blspn_positions), len(alpha_values)))
 
-    # Interpolate data values
-    for i, data in enumerate(data_list):
-        interp_func = np.interp(alpha_values, alpha, data)  # 1D interpolation for each blade span
-        interpolated_data[i, :] = interp_func
+    # Interpolate for each blade section
+    for i, (alpha_section, data_section) in enumerate(zip(alpha_data, polar_data)):
+        # Sort alpha and data to ensure proper interpolation
+        sort_idx = np.argsort(alpha_section)
+        alpha_section = alpha_section[sort_idx]
+        data_section = data_section[sort_idx]
+        
+        # Remove any duplicate alpha values
+        unique_idx = np.unique(alpha_section, return_index=True)[1]
+        alpha_section = alpha_section[unique_idx]
+        data_section = data_section[unique_idx]
+        
+        # Perform interpolation for this section
+        interpolated_values = np.interp(
+            alpha_values,
+            alpha_section,
+            data_section,
+            left=data_section[0],    # Use first value for extrapolation
+            right=data_section[-1]   # Use last value for extrapolation
+        )
+        
+        # Store the interpolated values (notice we store in rows now)
+        interpolated_data[i, :] = interpolated_values
+
+    # Create meshgrid for output
+    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions)
 
     return interpolated_data, alpha_grid, blspn_grid
 
 def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=1e-6, max_iter=100):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
-
-    Parameters:
-        r (array-like): Blade span positions.
-        u (array-like): Wind speed.
-        w (float): Rotational speed.
-        a (float): Axial induction factor.
-        B (float): Number of blades.
-        alpha_values (array-like): Array of alpha values.
-        cl_data (2D array): Interpolated lift coefficient data.
-        cd_data (2D array): Interpolated drag coefficient data.
-        sigma (array-like): Solidity function.
-        tolerance (float): Convergence tolerance.
-        max_iter (int): Maximum number of iterations.
-
-    Returns:
-        tuple: Final values of a, a', Cl, Cd, and alpha.
     """
+    # Ensure r and alpha_values are strictly ascending and unique
+    r = np.unique(r)
+    alpha_values = np.unique(alpha_values)
+
+    # Ensure B is a NumPy array and matches r's shape
+    B = np.array(B)
+    if len(B) != len(r):
+        raise ValueError(f"B shape {B.shape} does not match r shape {r.shape}")
+
     # Initialize a and a' arrays
     an = np.zeros_like(r)
     an_prime = np.zeros_like(r)
 
-    # Create interpolation functions for Cl and Cd
-    cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', bounds_error=False, fill_value=None)
-    cd_interp_func = RegularGridInterpolator((r, alpha_values), cd_data, method='linear', bounds_error=False, fill_value=None)
+    # Constants
+    w_new = 6.93
+    u_new = 9
+    A_new = 0.000535
 
-    # Interpolate w and u to match the shape of r
-    w_new = np.interp(r, np.linspace(r.min(), r.max(), len(w)), w)
-    u_new = np.interp(r, np.linspace(r.min(), r.max(), len(u)), u)
+    # Create interpolation functions
+    cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', 
+                                            bounds_error=False, fill_value=None)
+    cd_interp_func = RegularGridInterpolator((r, alpha_values), cd_data, method='linear', 
+                                            bounds_error=False, fill_value=None)
+
+    # Initialize storage for Cl and Cd
+    cl_new = np.zeros((len(r), len(alpha_values)))
+    cd_new = np.zeros((len(r), len(alpha_values)))
+    alpha_comp = np.zeros((len(r), len(alpha_values)))
 
     for iteration in range(max_iter):
-        # Expand a and a' for vectorized calculations
-        an_expanded = an[:, np.newaxis]
-        an_prime_expanded = an_prime[:, np.newaxis]
-
-        # Compute flow angle phi
+        # Compute flow angle phi for each r
         phi = np.arctan((1 - an) * u_new / ((1 + an_prime) * w_new))
-        phi_n = phi[:, np.newaxis]  # Expand phi to shape (len(r), 1)
-
+        phi_d = np.degrees(phi) 
+        # Create alpha_comp with correct broadcasting
         alpha_comp = np.zeros((len(r), len(alpha_values)))
-
         for i in range(len(r)):
-            A_new = np.interp(r[i], np.linspace(r.min(), r.max(), len(a)), a)
-            # Compute new alpha (angle of attack) for each blade span position
-            alpha_comp[i] = phi_n[i] - (A_new + B[i])
+            alpha_comp[:,i]  = phi_d[i] - (A_new + B[i])
+
+        # Create meshgrid for interpolation
+        r_grid, alpha_grid = np.meshgrid(r, alpha_values, indexing='ij')
         
-        # Interpolate Cl and Cd for the new alpha and r
-        cl_new = np.zeros_like(alpha_comp)
-        cd_new = np.zeros_like(alpha_comp)
-        for i in range(len(r)):
-            points = np.array([[r[i], alpha] for alpha in alpha_comp[i, :]])
-            cl_new[i, :] = cl_interp_func(points)
-            cd_new[i, :] = cd_interp_func(points)
+        # Ensure all arrays have correct shapes before stacking
+        r_points = r_grid.flatten()
+        alpha_points = alpha_comp.flatten()
+        
+        if len(r_points) != len(alpha_points):
+            raise ValueError(f"Dimension mismatch: r_points ({len(r_points)}) != alpha_points ({len(alpha_points)})")
+            
+        points = np.column_stack((r_points, alpha_points))
 
-        # Compute lift and drag coefficients
-        Cn = cl_new * np.cos(phi_n) - cd_new * np.sin(phi_n)
-        Ct = cl_new * np.sin(phi_n) + cd_new * np.cos(phi_n)
+        # Interpolate Cl and Cd
+        cl_new = cl_interp_func(points).reshape(len(r), len(alpha_values))
+        cd_new = cd_interp_func(points).reshape(len(r), len(alpha_values))
 
-        # Expand sigma for vectorized calculations
-        sigma_n = sigma[:, np.newaxis]
+        # Compute normal and tangential coefficients
+        Cn = cl_new * np.cos(phi_d[:, np.newaxis]) - cd_new * np.sin(phi_d[:, np.newaxis])
+        Ct = cl_new * np.sin(phi_d[:, np.newaxis]) + cd_new * np.cos(phi_d[:, np.newaxis])
 
-        # Compute new a and a'
-        a_new = 1 / (4 * (np.sin(phi_n) ** 2) / (sigma_n * Cn) + 1)
-        a_prime_new = 1 / (4 * np.sin(phi_n) * np.cos(phi_n) / (sigma_n * Ct) - 1)
+        # Compute new induction factors
+        a_new = 1 / (4 * (np.sin(phi_d[:, np.newaxis]) ** 2) / (sigma[:, np.newaxis] * Cn) + 1)
+        a_prime_new = 1 / (4 * np.sin(phi_d[:, np.newaxis]) * np.cos(phi_d[:, np.newaxis]) / 
+                          (sigma[:, np.newaxis] * Ct) - 1)
 
-        # Check for convergence
-        if np.all(np.abs(a_new - an_expanded) < tolerance) and np.all(np.abs(a_prime_new - an_prime_expanded) < tolerance):
+        # Check convergence
+        if (np.all(np.abs(a_new - an[:, np.newaxis]) < tolerance) and 
+            np.all(np.abs(a_prime_new - an_prime[:, np.newaxis]) < tolerance)):
             break
 
-        # Update a and a'
+        # Update values for next iteration
         an = a_new[:, 0]
         an_prime = a_prime_new[:, 0]
 
-    return an, an_prime, cl_new, cd_new, alpha_comp, B, phi_n, A_new
+    return cl_new, cd_new, alpha_comp, an, an_prime
 
-
-# 8 & 9 create a 2D table for interpolated Cl or Cd values
-def interpolated_table(interpolated_data, alpha_values, r, data_type="cl_new"):
+def create_2d_table(data, alpha_comp, r, data_type="Cl"):
     """
-    Creates a 2D table for interpolated Cl or Cd values.
+    Create a 2D pandas DataFrame for Cl or Cd values with segregated alpha ranges.
+    
+    Parameters:
+        data (numpy.ndarray): 2D array of shape (n_span, n_alpha) with Cl or Cd values
+        alpha_comp (numpy.ndarray): 2D array of shape (n_span, n_alpha) with angle of attack values
+        r (numpy.ndarray): Array of blade span positions
+        data_type (str): Type of data ("Cl" or "Cd")
+    
+    Returns:
+        pandas.DataFrame: 2D table with r values as rows and computed alpha values as columns
     """
-    interpolated_data = np.array(interpolated_data)
-    if interpolated_data.ndim != 2:
-        raise ValueError("Interpolated data must be a 2D array.")
-
-    if interpolated_data.shape != (len(r), len(alpha_values)):
-        raise ValueError(
-            "Dimensions of interpolated_data do not match blade span and alpha values."
-        )
-
-    table = pd.DataFrame(
-        interpolated_data,
-        index=r,
-        columns=alpha_values
-    )
-    table.index.name = "Blade Span (r)"
-    table.columns.name = f"Angle of Attack (α) - {data_type}"
-    return table
+    # Verify shapes
+    if data.shape != alpha_comp.shape:
+        raise ValueError(f"Data shape {data.shape} doesn't match alpha_comp shape {alpha_comp.shape}")
+    if len(r) != data.shape[0]:
+        raise ValueError(f"Number of span positions {len(r)} doesn't match data rows {data.shape[0]}")
+    
+    # Analyze alpha distribution for each span position
+    alpha_stats = pd.DataFrame(index=r, columns=['min', 'max', 'mean', 'std'])
+    for i, r_val in enumerate(r):
+        alpha_stats.loc[r_val] = {
+            'min': alpha_comp[i,:].min(),
+            'max': alpha_comp[i,:].max(),
+            'mean': alpha_comp[i,:].mean(),
+            'std': alpha_comp[i,:].std()
+        }
+    
+    # Create adaptive bins based on alpha distribution
+    overall_min = alpha_stats['min'].min()
+    overall_max = alpha_stats['max'].max()
+    std_mean = alpha_stats['std'].mean()
+    
+    # Create bins with finer resolution where alpha values are concentrated
+    bin_width = min(0.5, std_mean / 2)  # Adaptive bin width
+    alpha_bins = np.arange(overall_min - bin_width, 
+                          overall_max + bin_width, 
+                          bin_width)
+    
+    # Initialize DataFrame
+    df = pd.DataFrame(index=r, columns=alpha_bins[:-1])
+    
+    # Fill the DataFrame using binning approach
+    for i, r_val in enumerate(r):
+        # Get alpha values and corresponding data for this span position
+        alphas = alpha_comp[i, :]
+        values = data[i, :]
+        
+        # Sort alpha values and corresponding data
+        sort_idx = np.argsort(alphas)
+        alphas = alphas[sort_idx]
+        values = values[sort_idx]
+        
+        # Create bins and compute mean values in each bin
+        indices = np.digitize(alphas, alpha_bins) - 1
+        for j in range(len(alpha_bins) - 1):
+            mask = indices == j
+            if np.any(mask):
+                df.loc[r_val, alpha_bins[j]] = np.mean(values[mask])
+            else:
+                df.loc[r_val, alpha_bins[j]] = np.nan
+    
+    # Remove columns with all NaN values
+    df = df.dropna(axis=1, how='all')
+    
+    # Add alpha statistics as additional columns
+    df = pd.concat([df, alpha_stats], axis=1)
+    
+    # Set index and column names
+    df.index.name = 'Blade span [m]'
+    df.columns.name = 'Angle of attack [deg]'
+    
+    return df, alpha_stats
 

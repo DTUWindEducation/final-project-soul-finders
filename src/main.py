@@ -8,7 +8,7 @@ from turbine import TurbineData
 from __init__ import load_airfoil_shape
 from __init__ import load_airfoil_polar
 from __init__ import interpolate_2d
-from __init__ import interpolated_table
+from __init__ import create_2d_table
 from __init__ import compute_a_s
 from __init__ import sigma_calc
 
@@ -28,13 +28,13 @@ turbine_data = TurbineData(path_geometry, path_operational_strategy)
 # Load geometry data
 geometry = turbine_data.load_geometry()
 r, B, c, Ai = geometry['r'], geometry['B'], geometry['c'], geometry['Ai']
-print("twist",B)
+
 
 
 # Load operational strategy data
 operational_strategy = turbine_data.load_operational_strategy()
 u, a, w, P, T = operational_strategy['u'], operational_strategy['a'], operational_strategy['w'], operational_strategy['P'], operational_strategy['T']
-print("pitch",a)
+
 
 # 3. Load the airfoil shape
 
@@ -81,38 +81,53 @@ z_padding = (z_max - z_min) * 0.00000002  # Add 20% padding
 ax.set_zlim(0,170)
 
 plt.legend()
-plt.show()
+#plt.show()
 
 alpha_values = np.linspace(-180, 180, 100)  # Define alpha range
 cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
 cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
+alpha_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="alpha")
 sigma = sigma_calc(r, c)
 
-an, an_prime, cl_new, cd_new, alpha_comp, B, phi_n, A_new= compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma)
+print("cl_data shape:", cl_data.shape)
+print("r shape:", r.shape)
+print("alpha_values shape:", alpha_values.shape)
 
-print("alpha_comp", alpha_comp)
+# Call the function
+cl_new, cd_new, alpha_comp, an, an_prime = compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma)
 
-# Convert alpha_comp to a DataFrame for saving as a table
-alpha_comp_df = pd.DataFrame(alpha_comp)
+print("\nDebug information:")
+print(f"Alpha range at r={r[0]:.2f}m: {alpha_comp[0,:].min():.2f} to {alpha_comp[0,:].max():.2f}")
+print(f"Alpha range at r={r[-1]:.2f}m: {alpha_comp[-1,:].min():.2f} to {alpha_comp[-1,:].max():.2f}")
+print(f"Cl range: {cl_new.min():.2f} to {cl_new.max():.2f}")
+print(f"Cd range: {cd_new.min():.2f} to {cd_new.max():.2f}")
 
-# Save the DataFrame to a CSV file
-output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs"
-alpha_comp_df.to_csv(f"{output_folder}/alpha_comp1.csv", index=False)
+#create a table for alpha values 
+alpha_table = pd.DataFrame(alpha_comp, columns=[f"Alpha_{i}" for i in range(len(alpha_comp[0]))])
+output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
+os.makedirs(output_folder, exist_ok=True)
+alpha_table.to_csv(os.path.join(output_folder, "alpha_table.csv"), index=False)
+
+# Generate 2D tables for Cl and Cd
+# Replace these lines:
+# ...existing code...
+# Generate 2D tables for Cl and Cd
+cl_table, cl_stats = create_2d_table(cl_new, alpha_comp, r, data_type="Cl")
+cd_table, cd_stats = create_2d_table(cd_new, alpha_comp, r, data_type="Cd")
 
 
-cl_table = interpolated_table(cl_new, alpha_comp[0, :], r, data_type="cl_new")
-cd_table = interpolated_table(cd_new, alpha_comp[0, :], r, data_type="cd_new")
+
+# Create output directory if it doesn't exist
+output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
+os.makedirs(output_folder, exist_ok=True)
+
+# Save the tables and stats to CSV files
+cl_table.to_csv(os.path.join(output_folder, "cl_table.csv"))
+cd_table.to_csv(os.path.join(output_folder, "cd_table.csv"))
 
 
+print(f"Tables saved to {output_folder}")
 
-# Save to CSV
-cl_table.to_csv("cl_table.csv")
-cd_table.to_csv("cd_table.csv")
-output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs"
-
-# Save the tables to the specified output folder
-cl_table.to_csv(f"{output_folder}/cl_table.csv")
-cd_table.to_csv(f"{output_folder}/cd_table.csv")
 
 # 6. Plot the Cl and Cd values in 3D plots as subplots in the same figure
 fig = plt.figure(figsize=(16, 8))
