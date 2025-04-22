@@ -351,7 +351,7 @@ def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
     P = M * w_new  # Power [W]
     
     # Calculate rotor area
-    R = 117  # Rotor radius [m]
+    R = 120  # Rotor radius [m]
     A = np.pi * R**2  # Rotor area [m^2]
     
     # Calculate coefficients
