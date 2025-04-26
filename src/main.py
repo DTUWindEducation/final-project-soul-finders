@@ -8,7 +8,7 @@ from turbine import TurbineData
 from __init__ import load_airfoil_shape
 from __init__ import load_airfoil_polar
 from __init__ import interpolate_2d
-from __init__ import create_2d_table
+from __init__ import interpolate_wind_speed_var_parameter
 from __init__ import compute_a_s
 from __init__ import sigma_calc
 from __init__ import calculate_rotor_parameters
@@ -20,6 +20,7 @@ path_operational_strategy = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
 shape_files = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
 polar_files = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
+wind_speeds = {"wind_speed": "./inputs/wind_TI_0.1"}
 
 # 1. Load the geometry of the wind turbine blade
 # Create an object of the WindTurbineData class
@@ -34,7 +35,18 @@ r, B, c, Ai = geometry['r'], geometry['B'], geometry['c'], geometry['Ai']
 
 # Load operational strategy data
 operational_strategy = turbine_data.load_operational_strategy()
-u, a, w, P, T = operational_strategy['u'], operational_strategy['a'], operational_strategy['w'], operational_strategy['P'], operational_strategy['T']
+v, p, w, P, T = operational_strategy['v'], operational_strategy['p'], operational_strategy['w'], operational_strategy['P'], operational_strategy['T']
+
+# 2. Load the wind speed data
+
+for key, folder_path in wind_speeds.items():
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        if os.path.isfile(file_path) and file_name.endswith(".txt"):
+            u = np.loadtxt(file_path, skiprows=1)
+            # Process the wind speed data as needed
+            # For example, you can store it in a list or array for further analysis
+            # wind_speeds.append(wind_speed)
 
 
 # 3. Load the airfoil shape
@@ -84,50 +96,91 @@ ax.set_zlim(0,170)
 plt.legend()
 #plt.show()
 
-alpha_values = np.linspace(-180, 180, 100)  # Define alpha range
+alpha_values = np.linspace(-180, 180, 1000)  # Define alpha range
 cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
 cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cd")
 alpha_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="alpha")
 sigma = sigma_calc(r, c)
 
-print("cl_data shape:", cl_data.shape)
-print("r shape:", r.shape)
-print("alpha_values shape:", alpha_values.shape)
 
-# Call the function
-cl_new, cd_new, alpha_comp, an, an_prime = compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma)
+interpolated_results = {}
+a_s_results = {}
 
-print("\nDebug information:")
-print(f"Alpha range at r={r[0]:.2f}m: {alpha_comp[0,:].min():.2f} to {alpha_comp[0,:].max():.2f}")
-print(f"Alpha range at r={r[-1]:.2f}m: {alpha_comp[-1,:].min():.2f} to {alpha_comp[-1,:].max():.2f}")
-print(f"Cl range: {cl_new.min():.2f} to {cl_new.max():.2f}")
-print(f"Cd range: {cd_new.min():.2f} to {cd_new.max():.2f}")
+for key, folder_path in wind_speeds.items():  # key might be wind condition or category
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        if os.path.isfile(file_path) and file_name.endswith(".txt"):
+            # Load the time series wind speed data
+            u = np.loadtxt(file_path, skiprows=1)
+            
+            # Make sure wind_speed for each file is tracked
+            wind_speed_for_file = np.mean(u)  # or any other method of tracking wind speed
+            
+            # Interpolate wind-speed-dependent parameters
+            result = interpolate_wind_speed_var_parameter(u, v, p, w, P, T)
+
+            # Save for later (optional)
+            interpolated_results[file_name] = result
+
+            # Extract parameters needed for compute_a_s
+            local_wind_speeds = result['wind_speed']
+            interpolated_p = result['pitch']
+            interpolated_w = result['rotational_speed']
+
+            # Compute a and a'
+            cl_new, cd_new, alpha_comp, an, an_prime, dT, dM, w_new, u_new = compute_a_s(
+                r, local_wind_speeds, interpolated_p, interpolated_w,
+                B, alpha_values, cl_data, cd_data, sigma, rho=1.225,
+                tolerance=1e-6, max_iter=100
+            )
+
+            # Store results for this file
+            a_s_results[file_name] = {
+                'cl': cl_new,
+                'cd': cd_new,
+                'alpha': alpha_comp,
+                'a': an,
+                'a_prime': an_prime,
+                'dT': dT,
+                'dM': dM,
+                'w_new': w_new,
+                'u_new': u_new,
+                'wind_speed': wind_speed_for_file,  # Track wind speed for each file
+            }
+
+            
+
+output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs/interpolated_parameters_wind"
+os.makedirs(output_folder, exist_ok=True)
+
+# Loop through the interpolated results and save each as a CSV
+for file_name, res in interpolated_results.items():
+    # Create a DataFrame from the result dictionary
+    df = pd.DataFrame({
+        'time': res['time'],
+        'wind_speed': res['wind_speed'],
+        'pitch': res['pitch'],
+        'rotational_speed': res['rotational_speed'],
+        'power': res['power'],
+        'torque': res['torque']
+    })
+
+    # Create a valid filename by replacing .txt with _interpolated.csv
+    base_name = os.path.splitext(file_name)[0]
+    output_path = os.path.join(output_folder, f"{base_name}_interpolated.csv")
+
+    # Save the DataFrame to a CSV file
+    df.to_csv(output_path, index=False)
+    
+
+
+
 
 #create a table for alpha values 
 alpha_table = pd.DataFrame(alpha_comp, columns=[f"Alpha_{i}" for i in range(len(alpha_comp[0]))])
 output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
 os.makedirs(output_folder, exist_ok=True)
 alpha_table.to_csv(os.path.join(output_folder, "alpha_table.csv"), index=False)
-
-# Generate 2D tables for Cl and Cd
-# Replace these lines:
-# ...existing code...
-# Generate 2D tables for Cl and Cd
-cl_table, cl_stats = create_2d_table(cl_new, alpha_comp, r, data_type="Cl")
-cd_table, cd_stats = create_2d_table(cd_new, alpha_comp, r, data_type="Cd")
-
-
-
-# Create output directory if it doesn't exist
-output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
-os.makedirs(output_folder, exist_ok=True)
-
-# Save the tables and stats to CSV files
-cl_table.to_csv(os.path.join(output_folder, "cl_table.csv"))
-cd_table.to_csv(os.path.join(output_folder, "cd_table.csv"))
-
-
-print(f"Tables saved to {output_folder}")
 
 
 # 6. Plot the Cl and Cd values in 3D plots as subplots in the same figure
@@ -153,36 +206,76 @@ ax2.set_zlabel("Cd")
 ax2.set_title("Cd Values in 3D")
 
 plt.tight_layout()
-plt.show()
+#plt.show()
 
-rotor_params = calculate_rotor_parameters(r, an, an_prime, rho=1.225)
+# New dictionary to store the final rotor parameters
+rotor_results = {}
 
-# Print results
+# Loop through each file's results
+for file_name, results in a_s_results.items():
+    
+    # Extract all the needed variables for this file
+    dT = results['dT']
+    dM = results['dM']
+    w_new = results['w_new']
+    u_new = results['u_new']
+    
+    # Compute the rotor parameters
+    rotor_params = calculate_rotor_parameters(r, interpolated_w , dT, dM, u_new, rho=1.225)
+    
+    # Save the rotor parameters
+    rotor_results[file_name] = rotor_params
 
-print("\nRotor Parameters:")
-print(f"Thrust (T): {rotor_params['thrust']/1000:.2f} kN")
-print(f"Torque (M): {rotor_params['torque']/1000:.2f} kNm")
-print(f"Power (P): {rotor_params['power']/1000:.2f} kW")
-print(f"Thrust Coefficient (CT): {rotor_params['thrust_coefficient']:.3f}")
-print(f"Power Coefficient (CP): {rotor_params['power_coefficient']:.3f}")
+for file_name, params in rotor_results.items():
+    
+    print(f"File: {file_name}")
+    
+    print(f"  Thrust (kN): {np.mean(params['thrust']) / 1e3:.2f}")
+    print(f"  Torque (kNm): {np.mean(params['torque']) / 1e3:.2f}")
+    print(f"  Power (MW): {np.mean(params['power']) / 1e6:.2f}")
+    print(f"  Thrust Coefficient (CT): {np.mean(params['thrust_coefficient']):.4f}")
+    print(f"  Power Coefficient (CP): {np.mean(params['power_coefficient']):.4f}")
+    print("-" * 40)
 
-# Plot thrust and torque distribution
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-# Plot differential thrust
+
+# Create one big figure for all wind speeds
+fig = plt.figure(figsize=(14, 6))
+ax1 = fig.add_subplot(121, projection='3d')
+ax2 = fig.add_subplot(122, projection='3d')
+
 r_mid = (r[1:] + r[:-1]) / 2
-ax1.plot(r_mid, rotor_params['dT']/1000, 'b-')
+
+for file_name, result in a_s_results.items():
+    
+    # Retrieve the corresponding wind speed
+    wind_speed = interpolated_results[file_name]['wind_speed']
+    
+    # Take average wind speed or whatever makes sense
+    avg_wind_speed = np.mean(wind_speed)
+
+    # Plot dT (Thrust)
+    ax1.plot(r_mid, [avg_wind_speed]*len(r_mid), result['dT']/1000, label=f'{file_name}')
+
+    # Plot dM (Torque)
+    ax2.plot(r_mid, [avg_wind_speed]*len(r_mid), result['dM']/1000, label=f'{file_name}')
+
+# Set labels and titles
 ax1.set_xlabel('Blade span [m]')
-ax1.set_ylabel('dT [kN]')
-ax1.set_title('Thrust Distribution')
+ax1.set_ylabel('Wind Speed [m/s]')
+ax1.set_zlabel('dT [kN]')
+ax1.set_title('Thrust Distribution (All wind speeds)')
 ax1.grid(True)
 
-# Plot differential torque
-ax2.plot(r_mid, rotor_params['dM']/1000, 'r-')
 ax2.set_xlabel('Blade span [m]')
-ax2.set_ylabel('dM [kNm]')
-ax2.set_title('Torque Distribution')
+ax2.set_ylabel('Wind Speed [m/s]')
+ax2.set_zlabel('dM [kNm]')
+ax2.set_title('Torque Distribution (All wind speeds)')
 ax2.grid(True)
+
 
 plt.tight_layout()
 plt.show()
+
+u = np.loadtxt(file_path, skiprows=1)
+print(f"Raw wind speed data from {file_name}: {u[:10]}") 
