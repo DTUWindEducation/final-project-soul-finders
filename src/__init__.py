@@ -4,6 +4,9 @@ from io import StringIO
 import os
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import interp1d
+import matplotlib.pyplot as plt
+
 
 # 1. Load the geometry of the wind turbine blade
 def load_geometry(path_geometry):
@@ -330,8 +333,10 @@ def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
     u_new = 9.0   # m/s
 
     # Ensure positive induction factors and slice to match r_mid length
-    an = np.abs(an[:-1])  # Take absolute value and slice
-    an_prime = an_prime[:-1]  # Slice to match length
+    #an = np.abs(an[:-1])  # Take absolute value and slice
+    an = np.clip(an[:-1], 0, 1)  # Ensure 0 <= a < 1.
+    #an_prime = an_prime[:-1]  # Slice to match length
+    an_prime = np.clip(an_prime[:-1], 0, None)  # Ensure a' >= 0.
     
     # Calculate differential elements
     dr = np.diff(r)  # Distance between elements
@@ -348,7 +353,8 @@ def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
     M = np.sum(dM)  # Total torque [Nm]
     
     # Calculate power
-    P = M * w_new  # Power [W]
+    #P = M * w_new  # Power [W]
+    P = max(0, M * w_new)  # Power [W], ensure non-negative.
     
     # Calculate rotor area
     R = 120  # Rotor radius [m]
@@ -370,4 +376,156 @@ def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
         'dT': dT,
         'dM': dM,
         
+    }
+
+
+# 6 Compute optimal operational strategy
+def compute_optimal_strategy(wind_speed, opt_file_path):
+    """
+    Compute optimal blade pitch angle (θ_p) and rotational speed (ω)
+    as a function of wind speed (V_0) based on the provided operational strategy.
+
+    Parameters:
+        wind_speed (float): Wind speed (V_0) in m/s.
+        opt_file_path (str): Path to the `IEA_15MW_RWT_Onshore.opt` file.
+
+    Returns:
+        tuple: Interpolated blade pitch angle (θ_p) in degrees and rotational speed (ω) in rpm.
+    """
+    # Check if the file exists
+    if not os.path.exists(opt_file_path):
+        raise FileNotFoundError(f"Operational strategy file not found: {opt_file_path}")
+
+    # Load data from the .opt file
+    try:
+        data = np.loadtxt(opt_file_path, skiprows=1)  # Adjust skiprows if needed
+        V_0 = data[:, 0]  # Wind speed [m/s]
+        θ_p = data[:, 1]  # Blade pitch angle [deg]
+        ω = data[:, 2]    # Rotational speed [rpm]
+    except Exception as e:
+        raise ValueError(f"Error reading operational strategy file: {e}")
+
+    # Validate input wind speed
+    if wind_speed < 0:
+        raise ValueError("Wind speed must be a positive number.")
+
+    # Handle edge cases for wind speed
+    if wind_speed < V_0.min():
+        return 0.0, 0.0  # Default values for non-operational state
+    elif wind_speed > V_0.max():
+        return θ_p[-1], ω[-1]  # Use the last available data point
+
+    # Create interpolation functions
+    θ_p_interp = interp1d(V_0, θ_p, kind='linear', fill_value="extrapolate")
+    ω_interp = interp1d(V_0, ω, kind='linear', fill_value="extrapolate")
+
+    # Interpolate for the given wind speed
+    θ_p_opt = θ_p_interp(wind_speed)
+    ω_opt = ω_interp(wind_speed)
+
+    return θ_p_opt, ω_opt
+
+
+# 7 Compute and plot power curve and thrust curve
+def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path, geometry, rho=1.225):
+    """
+    Compute power and thrust curves based on the optimal operational strategy.
+
+    Parameters:
+        wind_speeds (array): Array of wind speeds (V_0) in m/s.
+        operational_strategy_path (str): Path to the operational strategy file.
+        geometry (tuple): Geometry data (r, B, c, Ai).
+        rho (float): Air density in kg/m^3 (default: 1.225).
+
+    Returns:
+        tuple: Arrays of power (P) in kW and thrust (T) in kN for each wind speed.
+    """
+    r, B, c, Ai = geometry
+    power = []
+    thrust = []
+
+    for V_0 in wind_speeds:
+        # Get optimal blade pitch angle (θ_p) and rotational speed (ω)
+        θ_p, ω = compute_optimal_strategy(V_0, operational_strategy_path)
+
+        # Compute rotor parameters (thrust, torque, power)
+        sigma = sigma_calc(r, c)
+        cl_data, _, _ = interpolate_2d(np.linspace(-180, 180, 100), "./inputs/IEA-15-240-RWT/Airfoils/polar_files", "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat", data_type="cl")
+        cd_data, _, _ = interpolate_2d(np.linspace(-180, 180, 100), "./inputs/IEA-15-240-RWT/Airfoils/polar_files", "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat", data_type="cd")
+        _, _, _, an, an_prime = compute_a_s(r, V_0, ω, 0, B, np.linspace(-180, 180, 100), cl_data, cd_data, sigma)
+        rotor_params = calculate_rotor_parameters(r, an, an_prime, rho)
+
+        # Append results
+        power.append(rotor_params['power'] / 1000)  # Convert to kW
+        thrust.append(rotor_params['thrust'] / 1000)  # Convert to kN
+
+    return np.array(power), np.array(thrust)
+
+
+def plot_power_and_thrust_curves(wind_speeds, power, thrust):
+    """
+    Plot power and thrust curves.
+
+    Parameters:
+        wind_speeds (array): Array of wind speeds (V_0) in m/s.
+        power (array): Array of power values (P) in kW.
+        thrust (array): Array of thrust values (T) in kN.
+    """
+    plt.figure(figsize=(12, 6))
+
+    # Power curve
+    plt.subplot(1, 2, 1)
+    plt.plot(wind_speeds, power, label="Power Curve", color="blue")
+    plt.xlabel("Wind Speed (m/s)")
+    plt.ylabel("Power (kW)")
+    plt.title("Power Curve (P(V_0))")
+    plt.grid(True)
+    plt.legend()
+
+    # Thrust curve
+    plt.subplot(1, 2, 2)
+    plt.plot(wind_speeds, thrust, label="Thrust Curve", color="green")
+    plt.xlabel("Wind Speed (m/s)")
+    plt.ylabel("Thrust (kN)")
+    plt.title("Thrust Curve (T(V_0))")
+    plt.grid(True)
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+def compute_rotor_thrust_torque_power(V_0, θ_p, ω, geometry, cl_data, cd_data, rho=1.225):
+    """
+    Compute thrust (T), torque (M), and power (P) of the rotor.
+
+    Parameters:
+        V_0 (float): Inflow wind speed [m/s].
+        θ_p (float): Blade pitch angle [deg].
+        ω (float): Rotational speed [rad/s].
+        geometry (tuple): Geometry data (r, B, c, Ai).
+        cl_data (array): Lift coefficient data.
+        cd_data (array): Drag coefficient data.
+        rho (float): Air density [kg/m^3] (default: 1.225).
+
+    Returns:
+        dict: Dictionary containing thrust (T), torque (M), and power (P).
+    """
+    r, B, c, Ai = geometry
+
+    # Compute solidity
+    sigma = sigma_calc(r, c)
+
+    # Compute axial and tangential induction factors
+    _, _, _, an, an_prime = compute_a_s(
+        r, V_0, ω, 0, B, np.linspace(-180, 180, 100), cl_data, cd_data, sigma
+    )
+
+    # Compute rotor parameters
+    rotor_params = calculate_rotor_parameters(r, an, an_prime, rho)
+
+    return {
+        "thrust": rotor_params["thrust"],  # Thrust [N]
+        "torque": rotor_params["torque"],  # Torque [Nm]
+        "power": rotor_params["power"],    # Power [W]
     }
