@@ -4,31 +4,7 @@ from io import StringIO
 import os
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
-
-# 1. Load the geometry of the wind turbine blade
-def load_geometry(path_geometry):
-    """
-    Load the geometry of the wind turbine blade
-    :ath_geometry: path to the geometry file
-    :return: r, B, c, Ai
-    """
-    path_geometry = Path(path_geometry)
-    data = np.genfromtxt(path_geometry, delimiter='', skip_header=6)
-    r, B, c, Ai = data[:, 0], data[:, 4], data[:, 5], data[:, 6]
-   
-    return r, B, c, Ai
-
-
-# 2. Load the operational strategy of the wind turbine
-def load_operational_strategy(path_operational_strategy):
-    """
-    Load the operational strategy of the wind turbine"
-    """
-    path_operational_strategy = Path(path_operational_strategy)
-    data = np.genfromtxt(path_operational_strategy, delimiter='', skip_header=1)
-    u, a, w, P, T = data[:, 0], data[:, 1], data[:, 2], data[:, 3], data[:, 4]
-    
-    return u, a, w, P, T
+from scipy.interpolate import interp1d
 
 
 # 3. Load the airfoil shape
@@ -98,13 +74,12 @@ def sigma_calc(r, c):
     return sigma
 
 # 10 computing a and a'
-def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl"):
+def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     """
     Interpolates Cl or Cd as a function of alpha and blade span.
     Returns data with shape (len(r), len(alpha_values))
     """
-    # Load blade span data
-    r, _, _, _ = load_geometry(path_geometry)
+
 
     # Initialize storage for data
     polar_data = []
@@ -155,11 +130,59 @@ def interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
         interpolated_data[i, :] = interpolated_values
 
     # Create meshgrid for output
-    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions)
+    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions, indexing='ij')
+
 
     return interpolated_data, alpha_grid, blspn_grid
 
-def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=1e-6, max_iter=100):
+
+
+def interpolate_wind_speed_var_parameter(u, v, p, w, P, T, num_points=50):
+    """
+    Interpolates parameters (p, w, P, T) for each wind speed value in time series data.
+    
+    Parameters:
+        u (ndarray): Time series data with shape (n,2) where:
+                     u[:,0] = time values
+                     u[:,1] = wind speed values
+        v (ndarray): Reference wind speeds (the x-axis for interpolation)
+        p (ndarray): Pitch angles corresponding to reference wind speeds
+        w (ndarray): Rotational speeds corresponding to reference wind speeds
+        P (ndarray): Power values corresponding to reference wind speeds
+        T (ndarray): Torque values corresponding to reference wind speeds
+    
+    Returns:
+        dict: Dictionary containing interpolated parameters for each time step with keys:
+              'time', 'wind_speed', 'pitch', 'rotational_speed', 'power', 'torque'
+    """
+    # Extract wind speeds from time series data
+    wind_speeds = u[:, 1]
+    
+    # Create interpolation functions for each parameter
+    interp_p = interp1d(v, p, kind='linear', bounds_error=False, fill_value=(p[0], p[-1]))
+    interp_w = interp1d(v, w, kind='linear', bounds_error=False, fill_value=(w[0], w[-1]))
+    interp_P = interp1d(v, P, kind='linear', bounds_error=False, fill_value=(P[0], P[-1]))
+    interp_T = interp1d(v, T, kind='linear', bounds_error=False, fill_value=(T[0], T[-1]))
+    
+    # Interpolate parameters for each wind speed
+    interpolated_p = interp_p(wind_speeds)
+    interpolated_w = interp_w(wind_speeds)
+    interpolated_P = interp_P(wind_speeds)
+    interpolated_T = interp_T(wind_speeds)
+
+    indices = np.linspace(0, len(u) - 1, num_points, dtype=int)
+    
+    return {
+        'time': u[indices, 0],
+        'wind_speed': wind_speeds[indices],
+        'pitch': interpolated_p[indices],
+        'rotational_speed': interpolated_w[indices],
+        'power': interpolated_P[indices],
+        'torque': interpolated_T[indices]
+    }
+
+
+def compute_a_s(r,wind_speeds, interpolated_p, interpolated_w , B, alpha_values, cl_data, cd_data, sigma,rho = 1.225, tolerance=1e-6, max_iter=1000):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
     """
@@ -177,10 +200,10 @@ def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=
     an_prime = np.zeros_like(r)
 
     # Constants
-    w_new = 6.93 # rad/s
-    u_new = 9
-    A_new = 0.000535
-
+    w_rpm = interpolated_w
+    w_new = w_rpm * 2 * np.pi / 60
+    u_new = wind_speeds
+    A_new = interpolated_p
     # Create interpolation functions
     cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', 
                                             bounds_error=False, fill_value=None)
@@ -191,39 +214,39 @@ def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=
     cl_new = np.zeros((len(r), len(alpha_values)))
     cd_new = np.zeros((len(r), len(alpha_values)))
     alpha_comp = np.zeros((len(r), len(alpha_values)))
-
+    
+     # Create meshgrid for interpolation
+    r_grid, alpha_grid = np.meshgrid(r, alpha_values, indexing='ij')
+    
     for iteration in range(max_iter):
+
+
         # Compute flow angle phi for each r
-        phi = np.arctan((1 - an) * u_new / ((1 + an_prime) * w_new))
+        phi = np.arctan2((1 - an) * u_new , ((1 + an_prime) * w_new))
         phi_d = np.degrees(phi) 
         # Create alpha_comp with correct broadcasting
-        alpha_comp = np.zeros((len(r), len(alpha_values)))
         for i in range(len(r)):
-            alpha_comp[:,i]  = phi_d[i] - (A_new + B[i])
+            alpha_comp[:,i]  = phi_d[i] - (A_new[i] + B[i])
+        alpha_comp = np.abs(alpha_comp)
 
-        # Create meshgrid for interpolation
-        r_grid, alpha_grid = np.meshgrid(r, alpha_values, indexing='ij')
-        
+
         # Ensure all arrays have correct shapes before stacking
-        r_points = r_grid.flatten()
-        alpha_points = alpha_comp.flatten()
-        
-        if len(r_points) != len(alpha_points):
-            raise ValueError(f"Dimension mismatch: r_points ({len(r_points)}) != alpha_points ({len(alpha_points)})")
-            
-        points = np.column_stack((r_points, alpha_points))
+        r_points = r_grid.flatten() 
+        points = np.column_stack((r_points, np.clip(alpha_comp.flatten(), alpha_values.min(), alpha_values.max())))
+
 
         # Interpolate Cl and Cd
         cl_new = cl_interp_func(points).reshape(len(r), len(alpha_values))
         cd_new = cd_interp_func(points).reshape(len(r), len(alpha_values))
+        
 
         # Compute normal and tangential coefficients
-        Cn = cl_new * np.cos(phi_d[:, np.newaxis]) - cd_new * np.sin(phi_d[:, np.newaxis])
-        Ct = cl_new * np.sin(phi_d[:, np.newaxis]) + cd_new * np.cos(phi_d[:, np.newaxis])
+        Cn = cl_new * np.cos(phi[:, np.newaxis]) - cd_new * np.sin(phi[:, np.newaxis])
+        Ct = cl_new * np.sin(phi[:, np.newaxis]) + cd_new * np.cos(phi[:, np.newaxis])
 
         # Compute new induction factors
-        a_new = 1 / (4 * (np.sin(phi_d[:, np.newaxis]) ** 2) / (sigma[:, np.newaxis] * Cn) + 1)
-        a_prime_new = 1 / (4 * np.sin(phi_d[:, np.newaxis]) * np.cos(phi_d[:, np.newaxis]) / 
+        a_new = 1 / (4 * (np.sin(phi[:, np.newaxis]) ** 2) / (sigma[:, np.newaxis] * Cn) + 1)
+        a_prime_new = 1 / (4 * np.sin(phi[:, np.newaxis]) * np.cos(phi[:, np.newaxis]) / 
                           (sigma[:, np.newaxis] * Ct) - 1)
 
         # Check convergence
@@ -232,10 +255,22 @@ def compute_a_s(r, u, w, a, B, alpha_values, cl_data, cd_data, sigma, tolerance=
             break
 
         # Update values for next iteration
-        an = a_new[:, 0]
-        an_prime = a_prime_new[:, 0]
+        an = np.clip(a_new[:, 0], 0, 0.4)  
+        an_prime = np.clip(a_prime_new[:, 0], 0, None)  # Clip a' to be ≥ 0
+        
+        dr = np.diff(r)  # Distance between elements
+        r_mid = (r[1:] + r[:-1]) / 2
 
-    return cl_new, cd_new, alpha_comp, an, an_prime
+        #shorten the shape of u_new and w_new to match the shape of r
+        
+        an_mid = (an[:-1] + an[1:]) / 2
+        an_prime_mid = (an_prime[:-1] + an_prime[1:]) / 2
+        u_new_mid = (u_new[:-1] + u_new[1:]) / 2
+        w_new1 = (w_new[:-1] + w_new[1:]) / 2
+        dT = 4 * np.pi * r_mid * rho * (u_new_mid ** 2) * an_mid * (1 - an_mid) * dr
+        dM = 4 * np.pi * (r_mid ** 3) * rho * u_new_mid * w_new1 * an_prime_mid * (1 - an_mid) * dr
+   
+    return cl_new, cd_new, alpha_comp, an, an_prime, dT, dM, w_new, u_new
 
 def create_2d_table(data, alpha_comp, r, data_type="Cl"):
     """
@@ -313,51 +348,39 @@ def create_2d_table(data, alpha_comp, r, data_type="Cl"):
 
     return df, alpha_stats
 
-def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
+
+def calculate_rotor_parameters(r, interpolated_w, dT, dM, u_new, rho=1.225):
+
     """
     Calculate thrust, torque, power and their coefficients.
-    
+
     Parameters:
         r (array): Blade span positions [m]
         an (array): Axial induction factors
         an_prime (array): Tangential induction factors
+        u_new (float): Wind speed [m/s]
+        w_rpm (float): Rotational speed [rpm]
         rho (float): Air density [kg/m^3]
-    
+
     Returns:
         dict: Dictionary containing rotor parameters
     """
-    w_new = 6.93  # rad/s
-    u_new = 9.0   # m/s
-
-    # Ensure positive induction factors and slice to match r_mid length
-    an = np.abs(an[:-1])  # Take absolute value and slice
-    an_prime = an_prime[:-1]  # Slice to match length
-    
-    # Calculate differential elements
-    dr = np.diff(r)  # Distance between elements
-    r_mid = (r[1:] + r[:-1]) / 2  # Midpoints for integration
-    
-   
-    
-    # Calculate differential thrust and torque for each element
-    dT = 4 * np.pi * r_mid * rho * (u_new ** 2) * an * (1 - an) * dr
-    dM = 4 * np.pi * (r_mid ** 3) * rho * u_new * w_new * an_prime * (1 - an) * dr
     
     # Integrate to get total thrust and torque
     T = np.sum(dT)  # Total thrust [N]
     M = np.sum(dM)  # Total torque [Nm]
     
-    # Calculate power
-    P = M * w_new  # Power [W]
+    w_rad_s = interpolated_w * 2 * np.pi / 60  # convert rpm -> rad/s
+    P = M * w_rad_s   # Power [W]
     
-    # Calculate rotor area
-    R = 120  # Rotor radius [m]
+    # Calculate rotor area using actual radius
+    R = r[-1]  # Use last r value as rotor radius
     A = np.pi * R**2  # Rotor area [m^2]
     
     # Calculate coefficients
     CT = T / (0.5 * rho * A * u_new**2)  # Thrust coefficient [-]
     CP = P / (0.5 * rho * A * u_new**3)  # Power coefficient [-]
-    
+
    
     
     return {
@@ -367,7 +390,5 @@ def calculate_rotor_parameters(r, an, an_prime, rho=1.225):
         'thrust_coefficient': CT,
         'power_coefficient': CP,
         'rotor_area': A,
-        'dT': dT,
-        'dM': dM,
         
     }
