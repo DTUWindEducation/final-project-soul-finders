@@ -93,8 +93,6 @@ z_min, z_max = min(r), max(r)
 z_padding = (z_max - z_min) * 0.00000002  # Add 20% padding
 ax.set_zlim(0,170)
 
-plt.legend()
-#plt.show()
 
 alpha_values = np.linspace(-180, 180, 1000)  # Define alpha range
 cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry, data_type="cl")
@@ -150,7 +148,7 @@ for key, folder_path in wind_speeds.items():  # key might be wind condition or c
 
             
 
-output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs/interpolated_parameters_wind"
+output_folder = "./outputs/interpolated_parameters_wind"
 os.makedirs(output_folder, exist_ok=True)
 
 # Loop through the interpolated results and save each as a CSV
@@ -173,41 +171,72 @@ for file_name, res in interpolated_results.items():
     df.to_csv(output_path, index=False)
     
 
+# Create output folders if they don't exist
+output_folder_cl = "./outputs/cl_table_windspeeds"
+output_folder_cd = "./outputs/cd_table_windspeeds"
+os.makedirs(output_folder_cl, exist_ok=True)
+os.makedirs(output_folder_cd, exist_ok=True)
+
+# Now loop through a_s_results and save Cl and Cd
+for file_name, res in a_s_results.items():
+    cl_array = res['cl']   # shape: (len(r), len(alpha_values))  → actually (len(r), len(alpha_comp))
+    cd_array = res['cd']
+    alpha_comp_array = res['alpha']  # This is what you want!
+
+    # r is a 1D array (length len(r))
+    r_array = r  # your blade span (still constant)
+
+    # Flatten for saving
+    R_flat = np.repeat(r_array, alpha_comp_array.shape[1])  # Repeat each r value for every alpha along axis-1
+    Alpha_flat = alpha_comp_array.flatten()
+    Cl_flat = cl_array.flatten()
+    Cd_flat = cd_array.flatten()
+
+    # Create DataFrames
+    df_cl = pd.DataFrame({
+        'r': R_flat,
+        'alpha_comp': Alpha_flat,
+        'Cl': Cl_flat
+    })
+
+    df_cd = pd.DataFrame({
+        'r': R_flat,
+        'alpha_comp': Alpha_flat,
+        'Cd': Cd_flat
+    })
+
+    # Build output paths
+    base_name = os.path.splitext(file_name)[0]
+    cl_output_path = os.path.join(output_folder_cl, f"{base_name}_cl.csv")
+    cd_output_path = os.path.join(output_folder_cd, f"{base_name}_cd.csv")
+
+    # Save to CSVs
+    df_cl.to_csv(cl_output_path, index=False)
+    df_cd.to_csv(cd_output_path, index=False)
 
 
 
-#create a table for alpha values 
-alpha_table = pd.DataFrame(alpha_comp, columns=[f"Alpha_{i}" for i in range(len(alpha_comp[0]))])
-output_folder = os.path.join(os.path.dirname(__file__), "..", "outputs")
-os.makedirs(output_folder, exist_ok=True)
-alpha_table.to_csv(os.path.join(output_folder, "alpha_table.csv"), index=False)
-
-
-# 6. Plot the Cl and Cd values in 3D plots as subplots in the same figure
-fig = plt.figure(figsize=(16, 8))
-
-# Create 2D grids for r and alpha_comp
-r_grid, alpha_grid = np.meshgrid(r, alpha_comp[0, :], indexing='ij')
+# Create correct 2D grids
+r_grid, alpha_grid = np.meshgrid(r, alpha_comp[0,:], indexing='ij')
 
 # First subplot for Cl
 ax1 = fig.add_subplot(121, projection='3d')
-ax1.plot_surface(alpha_grid, r_grid, cl_new, cmap='viridis')
-ax1.set_xlabel("Alpha (degrees)")
-ax1.set_ylabel("Blade Span (r)")
+ax1.plot_surface(r_grid, alpha_grid, cl_new, cmap='viridis')
+ax1.set_xlabel("Blade Span (r)")
+ax1.set_ylabel("Alpha (radians)")
 ax1.set_zlabel("Cl")
 ax1.set_title("Cl Values in 3D")
 
 # Second subplot for Cd
 ax2 = fig.add_subplot(122, projection='3d')
-ax2.plot_surface(alpha_grid, r_grid, cd_new, cmap='viridis')
-ax2.set_xlabel("Alpha (degrees)")
-ax2.set_ylabel("Blade Span (r)")
+ax2.plot_surface(r_grid, alpha_grid, cd_new, cmap='viridis')
+ax2.set_xlabel("Blade Span (r)")
+ax2.set_ylabel("Alpha (radians)")
 ax2.set_zlabel("Cd")
 ax2.set_title("Cd Values in 3D")
 
 plt.tight_layout()
-#plt.show()
-
+plt.show
 # New dictionary to store the final rotor parameters
 rotor_results = {}
 
@@ -225,17 +254,6 @@ for file_name, results in a_s_results.items():
     
     # Save the rotor parameters
     rotor_results[file_name] = rotor_params
-
-for file_name, params in rotor_results.items():
-    
-    print(f"File: {file_name}")
-    
-    print(f"  Thrust (kN): {np.mean(params['thrust']) / 1e3:.2f}")
-    print(f"  Torque (kNm): {np.mean(params['torque']) / 1e3:.2f}")
-    print(f"  Power (MW): {np.mean(params['power']) / 1e6:.2f}")
-    print(f"  Thrust Coefficient (CT): {np.mean(params['thrust_coefficient']):.4f}")
-    print(f"  Power Coefficient (CP): {np.mean(params['power_coefficient']):.4f}")
-    print("-" * 40)
 
 
 
@@ -276,6 +294,3 @@ ax2.grid(True)
 
 plt.tight_layout()
 plt.show()
-
-u = np.loadtxt(file_path, skiprows=1)
-print(f"Raw wind speed data from {file_name}: {u[:10]}") 

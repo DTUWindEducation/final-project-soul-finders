@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 
 
+
 # 3. Load the airfoil shape
 def load_airfoil_shape(path_shape):
     """
@@ -84,8 +85,9 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
 
     # Initialize storage for data
     polar_data = []
-    alpha_data = []
     blspn_positions = []
+    alpha_data = []
+    
 
     # Loop through polar files and extract data
     for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
@@ -131,7 +133,7 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
         interpolated_data[i, :] = interpolated_values
 
     # Create meshgrid for output
-    alpha_grid, blspn_grid = np.meshgrid(alpha_values, blspn_positions, indexing='ij')
+    blspn_grid, alpha_grid = np.meshgrid( blspn_positions, alpha_values, indexing='ij')
 
 
     return interpolated_data, alpha_grid, blspn_grid
@@ -224,11 +226,13 @@ def compute_a_s(r,wind_speeds, interpolated_p, interpolated_w , B, alpha_values,
 
         # Compute flow angle phi for each r
         phi = np.arctan2((1 - an) * u_new , ((1 + an_prime) * w_new))
-        phi_d = np.degrees(phi) 
+        A_new_rad = np.radians(A_new) if np.max(np.abs(A_new)) > 2*np.pi else A_new
+        B_rad = np.radians(B) if np.max(np.abs(B)) > 2*np.pi else B
         # Create alpha_comp with correct broadcasting
         for i in range(len(r)):
-            alpha_comp[:,i]  = phi_d[i] - (A_new[i] + B[i])
-        alpha_comp = np.abs(alpha_comp)
+            alpha_comp[:,i]  = phi[i] - (A_new_rad[i] + B_rad[i])
+        
+        
 
 
         # Ensure all arrays have correct shapes before stacking
@@ -273,81 +277,6 @@ def compute_a_s(r,wind_speeds, interpolated_p, interpolated_w , B, alpha_values,
    
     return cl_new, cd_new, alpha_comp, an, an_prime, dT, dM, w_new, u_new
 
-def create_2d_table(data, alpha_comp, r, data_type="Cl"):
-    """
-    Create a 2D pandas DataFrame for Cl or Cd values with segregated alpha ranges.
-    
-    Parameters:
-        data (numpy.ndarray): 2D array of shape (n_span, n_alpha) with Cl or Cd values
-        alpha_comp (numpy.ndarray): 2D array of shape (n_span, n_alpha) with angle of attack values
-        r (numpy.ndarray): Array of blade span positions
-        data_type (str): Type of data ("Cl" or "Cd")
-    
-    Returns:
-        pandas.DataFrame: 2D table with r values as rows and computed alpha values as columns
-    """
-    # Verify shapes
-    if data.shape != alpha_comp.shape:
-        raise ValueError(f"Data shape {data.shape} doesn't match alpha_comp shape {alpha_comp.shape}")
-    if len(r) != data.shape[0]:
-        raise ValueError(f"Number of span positions {len(r)} doesn't match data rows {data.shape[0]}")
-    
-    # Analyze alpha distribution for each span position
-    alpha_stats = pd.DataFrame(index=r, columns=['min', 'max', 'mean', 'std'])
-    for i, r_val in enumerate(r):
-        alpha_stats.loc[r_val] = {
-            'min': alpha_comp[i,:].min(),
-            'max': alpha_comp[i,:].max(),
-            'mean': alpha_comp[i,:].mean(),
-            'std': alpha_comp[i,:].std()
-        }
-    
-    # Create adaptive bins based on alpha distribution
-    overall_min = alpha_stats['min'].min()
-    overall_max = alpha_stats['max'].max()
-    std_mean = alpha_stats['std'].mean()
-    
-    # Create bins with finer resolution where alpha values are concentrated
-    bin_width = min(0.5, std_mean / 2)  # Adaptive bin width
-    alpha_bins = np.arange(overall_min - bin_width, 
-                          overall_max + bin_width, 
-                          bin_width)
-    
-    # Initialize DataFrame
-    df = pd.DataFrame(index=r, columns=alpha_bins[:-1])
-    
-    # Fill the DataFrame using binning approach
-    for i, r_val in enumerate(r):
-        # Get alpha values and corresponding data for this span position
-        alphas = alpha_comp[i, :]
-        values = data[i, :]
-        
-        # Sort alpha values and corresponding data
-        sort_idx = np.argsort(alphas)
-        alphas = alphas[sort_idx]
-        values = values[sort_idx]
-        
-        # Create bins and compute mean values in each bin
-        indices = np.digitize(alphas, alpha_bins) - 1
-        for j in range(len(alpha_bins) - 1):
-            mask = indices == j
-            if np.any(mask):
-                df.loc[r_val, alpha_bins[j]] = np.mean(values[mask])
-            else:
-                df.loc[r_val, alpha_bins[j]] = np.nan
-    
-    # Remove columns with all NaN values
-    df = df.dropna(axis=1, how='all')
-    
-    # Add alpha statistics as additional columns
-    df = pd.concat([df, alpha_stats], axis=1)
-    
-    # Set index and column names
-    df.index.name = 'Blade span [m]'
-    df.columns.name = 'Angle of attack [deg]'
-    
-
-    return df, alpha_stats
 
 
 def calculate_rotor_parameters(r, interpolated_w, dT, dM, u_new, rho=1.225):
