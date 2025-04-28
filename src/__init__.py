@@ -82,12 +82,11 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     Returns data with shape (len(r), len(alpha_values))
     """
 
-
     # Initialize storage for data
     polar_data = []
     blspn_positions = []
     alpha_data = []
-    
+    polar_files = []  # To store the names of polar files
 
     # Loop through polar files and extract data
     for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
@@ -95,16 +94,17 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
         if os.path.isfile(file_path) and file_name.endswith(".dat"):
             alpha, cl, cd = load_airfoil_polar(file_path)
             data = cl if data_type == "cl" else cd
-            
+
             # Store the data for this airfoil section
             polar_data.append(data)
             alpha_data.append(alpha)
+            polar_files.append(file_name)  # Store the file name
             if i < len(r):
                 blspn_positions.append(r[i])
 
     # Convert lists to numpy arrays and ensure same length as r
     blspn_positions = np.array(blspn_positions)
-    
+
     # Initialize the interpolated data array with the correct shape (r, alpha)
     interpolated_data = np.zeros((len(blspn_positions), len(alpha_values)))
 
@@ -114,12 +114,17 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
         sort_idx = np.argsort(alpha_section)
         alpha_section = alpha_section[sort_idx]
         data_section = data_section[sort_idx]
+        # Reverse the data if necessary (e.g., if Cd is inverted)
         
+        if data_type == "cd" and data_section[0] > data_section[-1]:
+            data_section = data_section[::-1]
+            alpha_section = alpha_section[::-1]
+
         # Remove any duplicate alpha values
         unique_idx = np.unique(alpha_section, return_index=True)[1]
         alpha_section = alpha_section[unique_idx]
         data_section = data_section[unique_idx]
-        
+
         # Perform interpolation for this section
         interpolated_values = np.interp(
             alpha_values,
@@ -128,202 +133,163 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
             left=data_section[0],    # Use first value for extrapolation
             right=data_section[-1]   # Use last value for extrapolation
         )
-        
+
         # Store the interpolated values (notice we store in rows now)
         interpolated_data[i, :] = interpolated_values
 
     # Create meshgrid for output
-    blspn_grid, alpha_grid = np.meshgrid( blspn_positions, alpha_values, indexing='ij')
+    blspn_grid, alpha_grid = np.meshgrid(blspn_positions, alpha_values, indexing='ij')
 
+    
 
     return interpolated_data, alpha_grid, blspn_grid
 
 
 
-def interpolate_wind_speed_var_parameter(u, v, p, w, P, T, num_points=50):
-    """
-    Interpolates parameters (p, w, P, T) for each wind speed value in time series data.
-    
-    Parameters:
-        u (ndarray): Time series data with shape (n,2) where:
-                     u[:,0] = time values
-                     u[:,1] = wind speed values
-        v (ndarray): Reference wind speeds (the x-axis for interpolation)
-        p (ndarray): Pitch angles corresponding to reference wind speeds
-        w (ndarray): Rotational speeds corresponding to reference wind speeds
-        P (ndarray): Power values corresponding to reference wind speeds
-        T (ndarray): Torque values corresponding to reference wind speeds
-    
-    Returns:
-        dict: Dictionary containing interpolated parameters for each time step with keys:
-              'time', 'wind_speed', 'pitch', 'rotational_speed', 'power', 'torque'
-    """
-    # Extract wind speeds from time series data
-    wind_speeds = u[:, 1]
-    
-    # Create interpolation functions for each parameter
-    interp_p = interp1d(v, p, kind='linear', bounds_error=False, fill_value=(p[0], p[-1]))
-    interp_w = interp1d(v, w, kind='linear', bounds_error=False, fill_value=(w[0], w[-1]))
-    interp_P = interp1d(v, P, kind='linear', bounds_error=False, fill_value=(P[0], P[-1]))
-    interp_T = interp1d(v, T, kind='linear', bounds_error=False, fill_value=(T[0], T[-1]))
-    
-    # Interpolate parameters for each wind speed
-    interpolated_p = interp_p(wind_speeds)
-    interpolated_w = interp_w(wind_speeds)
-    interpolated_P = interp_P(wind_speeds)
-    interpolated_T = interp_T(wind_speeds)
-
-    indices = np.linspace(0, len(u) - 1, num_points, dtype=int)
-    
-    return {
-        'time': u[indices, 0],
-        'wind_speed': wind_speeds[indices],
-        'pitch': interpolated_p[indices],
-        'rotational_speed': interpolated_w[indices],
-        'power': interpolated_P[indices],
-        'torque': interpolated_T[indices]
-    }
-
-
-def compute_a_s(r,wind_speeds, interpolated_p, interpolated_w , B, alpha_values, cl_data, cd_data, sigma,rho = 1.225, tolerance=1e-6, max_iter=1000):
+def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225, tolerance=1e-6, max_iter=10000):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
     """
-    # Ensure r and alpha_values are strictly ascending and unique
-    r = np.unique(r)
-    alpha_values = np.unique(alpha_values)
-
-    # Ensure B is a NumPy array and matches r's shape
-    B = np.array(B)
-    if len(B) != len(r):
-        raise ValueError(f"B shape {B.shape} does not match r shape {r.shape}")
-
-    # Initialize a and a' arrays
-    an = np.zeros_like(r)
+    # Initialize arrays
+    an = np.full_like(r, 1/3)  # Initialize with theoretical optimal value
     an_prime = np.zeros_like(r)
+    cl_new = np.zeros_like(r)
+    cd_new = np.zeros_like(r)
 
     # Constants
-    w_rpm = interpolated_w
+    w_rpm = w[6]
     w_new = w_rpm * 2 * np.pi / 60
-    u_new = wind_speeds
-    A_new = interpolated_p
-    # Create interpolation functions
-    cl_interp_func = RegularGridInterpolator((r, alpha_values), cl_data, method='linear', 
-                                            bounds_error=False, fill_value=None)
-    cd_interp_func = RegularGridInterpolator((r, alpha_values), cd_data, method='linear', 
-                                            bounds_error=False, fill_value=None)
-
-    # Initialize storage for Cl and Cd
-    cl_new = np.zeros((len(r), len(alpha_values)))
-    cd_new = np.zeros((len(r), len(alpha_values)))
-    alpha_comp = np.zeros((len(r), len(alpha_values)))
-    
-     # Create meshgrid for interpolation
-    r_grid, alpha_grid = np.meshgrid(r, alpha_values, indexing='ij')
+    u_new = v[6]
+    A_new = p[6]
     
     for iteration in range(max_iter):
-
-
-        # Compute flow angle phi for each r
-        phi = np.arctan2((1 - an) * u_new , ((1 + an_prime) * w_new))
-        A_new_rad = np.radians(A_new) if np.max(np.abs(A_new)) > 2*np.pi else A_new
-        B_rad = np.radians(B) if np.max(np.abs(B)) > 2*np.pi else B
-        # Create alpha_comp with correct broadcasting
+        # Compute flow angle phi
+        phi = np.arctan2((1 - an) * u_new, ((1 + an_prime) * w_new * r))
+        
+        # Calculate angle of attack in degrees
+        alpha_comp = np.degrees(phi) - A_new - B
+        alpha_comp = np.where(r == 0, 0, alpha_comp)  # Handle root section
+        
+        # Clip alpha to valid range
+        alpha_comp = np.clip(alpha_comp, alpha_values.min(), alpha_values.max())
+        
+        # Create interpolator functions for cl and cd
         for i in range(len(r)):
-            alpha_comp[:,i]  = phi[i] - (A_new_rad[i] + B_rad[i])
-        
-        
-
-
-        # Ensure all arrays have correct shapes before stacking
-        r_points = r_grid.flatten() 
-        points = np.column_stack((r_points, np.clip(alpha_comp.flatten(), alpha_values.min(), alpha_values.max())))
-
-
-        # Interpolate Cl and Cd
-        cl_new = cl_interp_func(points).reshape(len(r), len(alpha_values))
-        cd_new = cd_interp_func(points).reshape(len(r), len(alpha_values))
-        
+            # Get cl and cd values directly from interpolated data
+            cl_new[i] = np.interp(alpha_comp[i], alpha_values, cl_data[i, :])
+            cd_new[i] = np.interp(alpha_comp[i], alpha_values, cd_data[i, :])
 
         # Compute normal and tangential coefficients
-        Cn = cl_new * np.cos(phi[:, np.newaxis]) - cd_new * np.sin(phi[:, np.newaxis])
-        Ct = cl_new * np.sin(phi[:, np.newaxis]) + cd_new * np.cos(phi[:, np.newaxis])
+        Cn = cl_new * np.cos(phi) - cd_new * np.sin(phi)
+        Ct = cl_new * np.sin(phi) + cd_new * np.cos(phi)
 
-        # Compute new induction factors
-        a_new = 1 / (4 * (np.sin(phi[:, np.newaxis]) ** 2) / (sigma[:, np.newaxis] * Cn) + 1)
-        a_prime_new = 1 / (4 * np.sin(phi[:, np.newaxis]) * np.cos(phi[:, np.newaxis]) / 
-                          (sigma[:, np.newaxis] * Ct) - 1)
+        # Compute new induction factors with Glauert correction
+        a_new = np.zeros_like(r)
+        for i in range(len(r)):
+            if Cn[i] > 0:  # Avoid division by zero
+                a_temp = 1 / (4 * np.sin(phi[i])**2 / (sigma[i] * Cn[i]) + 1)
+                # Apply Glauert correction for a > 0.4
+                if a_temp > 0.4:
+                    a_new[i] = 0.4
+                else:
+                    a_new[i] = a_temp
+            else:
+                a_new[i] = 0
+
+        # Compute tangential induction factor
+        a_prime_new = np.zeros_like(r)
+        for i in range(len(r)):
+            if Ct[i] > 0:  # Avoid division by zero
+                a_prime_new[i] = 1 / (4 * np.sin(phi[i]) * np.cos(phi[i]) / (sigma[i] * Ct[i]) - 1)
+
+        # Apply relaxation factor
+        relaxation = 0.25
+        a_new = (1 - relaxation) * an + relaxation * a_new
+        a_prime_new = (1 - relaxation) * an_prime + relaxation * a_prime_new
 
         # Check convergence
-        if (np.all(np.abs(a_new - an[:, np.newaxis]) < tolerance) and 
-            np.all(np.abs(a_prime_new - an_prime[:, np.newaxis]) < tolerance)):
+        if (np.all(np.abs(a_new - an) < tolerance) and 
+            np.all(np.abs(a_prime_new - an_prime) < tolerance)):
             break
 
         # Update values for next iteration
-        an = np.clip(a_new[:, 0], 0, 0.4)  
-        an_prime = np.clip(a_prime_new[:, 0], 0, None)  # Clip a' to be ≥ 0
-        
-        dr = np.diff(r)  # Distance between elements
-        r_mid = (r[1:] + r[:-1]) / 2
+        an = a_new
+        an_prime = a_prime_new
 
-        #shorten the shape of u_new and w_new to match the shape of r
-        
-        an_mid = (an[:-1] + an[1:]) / 2
-        an_prime_mid = (an_prime[:-1] + an_prime[1:]) / 2
-        u_new_mid = (u_new[:-1] + u_new[1:]) / 2
-        w_new1 = (w_new[:-1] + w_new[1:]) / 2
-        dT = 4 * np.pi * r_mid * rho * (u_new_mid ** 2) * an_mid * (1 - an_mid) * dr
-        dM = 4 * np.pi * (r_mid ** 3) * rho * u_new_mid * w_new1 * an_prime_mid * (1 - an_mid) * dr
+    
+    
+    
+    # Debug: Print values for each blade element
+    #print(f"Iteration {iteration + 1}:")
+    #for i in range(len(r)):
+    #    print(f"  Blade Element r = {r[i]:.2f} m:")
+    #    print(f"    Cl = {cl_new[i]:.4f}, Cd = {cd_new[i]:.4f}")
+    #    print(f"alpha_comp = {alpha_comp[i]:.4f}")
+    #    print(f"    a = {an[i]:.4f}, a' = {an_prime[i]:.4f}")
+    #    print(f"  phi = {np.degrees(phi[i]):.2f}°")
    
-    return cl_new, cd_new, alpha_comp, an, an_prime, dT, dM, w_new, u_new
+    return cl_new, cd_new, alpha_comp, an, an_prime, u_new
 
 
 
-def calculate_rotor_parameters(r, interpolated_w, dT, dM, u_new, rho=1.225):
-
-    """
-    Calculate thrust, torque, power and their coefficients.
-
-    Parameters:
-        r (array): Blade span positions [m]
-        an (array): Axial induction factors
-        an_prime (array): Tangential induction factors
-        u_new (float): Wind speed [m/s]
-        w_rpm (float): Rotational speed [rpm]
-        rho (float): Air density [kg/m^3]
-
-    Returns:
-        dict: Dictionary containing rotor parameters
-    """
-
+def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
+    """Calculate rotor parameters for each blade element"""
     
+    # Convert rotational speed from rpm to rad/s
+    w_rpm = w[6]  
+    w_new = w_rpm * 2 * np.pi / 60
+    u_new = v[6]
 
-    # Integrate to get total thrust and torque
-    T = np.sum(dT)  # Total thrust [N]
-    M = np.sum(dM)  # Total torque [Nm]
-    
-    w_new = interpolated_w * 2 * np.pi / 60  # Convert to rad/s
-    P = M * w_new
-    # Calculate rotor area using actual radius
-    R = r[-1]  # Use last r value as rotor radius
-    A = np.pi * R**2  # Rotor area [m^2]
-    
-    # Calculate coefficients
-    CT = T / (0.5 * rho * A * u_new**2)  # Thrust coefficient [-]
-    CP = P / (0.5 * rho * A * u_new**3)  # Power coefficient [-]
+    # Calculate differentials for each element
+    dr = np.diff(r)
+    r_mid = (r[:-1] + r[1:]) / 2
+    an_mid = (an[:-1] + an[1:]) / 2
+    an_prime_mid = (an_prime[:-1] + an_prime[1:]) / 2
 
-   
+    # Initialize arrays for local values
+    dT = np.zeros(len(r)-1)
+    dM = np.zeros(len(r)-1)
+    
+    # Calculate thrust and torque for each element
+    for i in range(len(r)-1):
+        dT[i] = 4 * np.pi * r_mid[i] * rho * (u_new ** 2) * an_mid[i] * (1 - an_mid[i]) * dr[i]
+        dM[i] = 4 * np.pi * (r_mid[i] ** 3) * rho * u_new * w_new * an_prime_mid[i] * (1 - an_mid[i]) * dr[i]
+    
+    # Calculate total values
+    T = np.sum(dT)
+    M = np.sum(dM)
+    Power = M * w_new
+    
+    # Calculate rotor coefficients
+    R = r[-1]
+    A = np.pi * R**2
+    CT = T / (0.5 * rho * A * u_new**2)
+    CP = Power / (0.5 * rho * A * u_new**3)
+    
+    # Print local values for each element
+    #for i in range(len(r)-1):
+    #    local_power = dM[i] * w_new
+     #   print(f"Blade Element r = {r_mid[i]:.2f} m:")
+      #  print(f"  Local Thrust = {dT[i]/1000:.4f} kN")
+       # print(f"  Local Torque = {dM[i]/1000:.4f} kNm")
+        #print(f"  Local Power = {local_power/1e6:.4f} MW")
+    
+    # Print total values
+    #print("\nTotal Rotor Values:")
+    print(f"Total Thrust = {T/1000:.4f} kN")
+    #print(f"Total Torque = {M/1000:.4f} kNm")
+    print(f"Total Power = {Power/1e6:.4f} MW")
+    #print(f"CT = {CT:.4f}")
+    #print(f"CP = {CP:.4f}")
     
     return {
         'thrust': T,
         'torque': M,
-        'power': P,
+        'power': Power,
         'thrust_coefficient': CT,
         'power_coefficient': CP,
-        'rotor_area': A,
-        
+        'rotor_area': A
     }
-
 
 # 6 Compute optimal operational strategy
 def compute_optimal_strategy(wind_speed, opt_file_path):
