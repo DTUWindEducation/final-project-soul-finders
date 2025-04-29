@@ -49,13 +49,4 @@ class TurbineData:
         self.operational_strategy_data = {"v": v, "p": p, "w": w, "P": P, "T": T}
         return self.operational_strategy_data
     
-    def load_wind_speed(self):
-        """
-        Load the wind speed data.
-
-        Returns:
-            np.ndarray: Array of wind speed values.
-        """
-        data = np.genfromtxt(self.operational_strategy_path, delimiter='', skip_header=1)
-        u = data[:, 0]
-        return u
+    
