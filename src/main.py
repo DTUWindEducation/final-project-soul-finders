@@ -150,7 +150,7 @@ for key, folder_path in wind_speeds.items():  # key might be wind condition or c
 
             
 
-output_folder = "/Users/maksiu/Desktop/DTU/1 st semester/python/final-project-soul-finders/outputs/interpolated_parameters_wind"
+output_folder = "./outputs/interpolated_parameters_wind"
 os.makedirs(output_folder, exist_ok=True)
 
 # Loop through the interpolated results and save each as a CSV
