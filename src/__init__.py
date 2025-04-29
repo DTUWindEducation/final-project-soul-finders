@@ -88,6 +88,7 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     alpha_data = []
     polar_files = []  # To store the names of polar files
 
+
     # Loop through polar files and extract data
     for i, file_name in enumerate(sorted(os.listdir(polar_files_dir))):
         file_path = os.path.join(polar_files_dir, file_name)
@@ -138,7 +139,9 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
         interpolated_data[i, :] = interpolated_values
 
     # Create meshgrid for output
+
     blspn_grid, alpha_grid = np.meshgrid(blspn_positions, alpha_values, indexing='ij')
+
 
     
 
@@ -178,6 +181,7 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225,
             # Get cl and cd values directly from interpolated data
             cl_new[i] = np.interp(alpha_comp[i], alpha_values, cl_data[i, :])
             cd_new[i] = np.interp(alpha_comp[i], alpha_values, cd_data[i, :])
+
 
         # Compute normal and tangential coefficients
         Cn = cl_new * np.cos(phi) - cd_new * np.sin(phi)
@@ -229,6 +233,7 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225,
     #    print(f"  phi = {np.degrees(phi[i]):.2f}°")
    
     return cl_new, cd_new, alpha_comp, an, an_prime, u_new
+
 
 
 
