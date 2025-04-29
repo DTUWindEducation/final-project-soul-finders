@@ -272,8 +272,7 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225,
         an = a_new
         an_prime = a_prime_new
 
-    
-    
+        
     
     # Debug: Print values for each blade element
     #print(f"Iteration {iteration + 1}:")
@@ -329,6 +328,52 @@ def save_blade_results(r, u_new, cl_new, cd_new, alpha_comp, an, an_prime, outpu
         print(f"Error saving results: {e}")
         return False
 
+def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
+    """
+    Plot 3D graphs for cl and cd with respect to blade span (r) and angle of attack (alpha_comp).
+
+    Args:
+        r (array): Blade span positions [m].
+        alpha_values (array): Angle of attack grid [deg].
+        cl_data (2D array): Lift coefficient data for each blade span and angle of attack.
+        cd_data (2D array): Drag coefficient data for each blade span and angle of attack.
+        alpha_comp (array): Angle of attack values to interpolate [deg].
+    """
+    # Create a meshgrid for r and alpha_comp
+    R, Alpha = np.meshgrid(r, alpha_comp, indexing='ij')
+
+    # Interpolate cl and cd data to match the meshgrid
+    cl_new = np.zeros_like(R)
+    cd_new = np.zeros_like(R)
+
+    for i in range(len(r)):
+        # Interpolate cl and cd from alpha_values to alpha_comp
+        cl_new[i, :] = np.interp(alpha_comp, alpha_values, cl_data[i, :])
+        cd_new[i, :] = np.interp(alpha_comp, alpha_values, cd_data[i, :])
+
+    fig = plt.figure(figsize=(16, 8))
+
+    # First subplot: cl vs r and alpha_comp
+    ax1 = fig.add_subplot(121, projection='3d')
+    ax1.plot_surface(R, Alpha, cl_new, cmap='viridis', edgecolor='none', alpha=0.8)
+    ax1.set_title("Lift Coefficient (Cl) vs Blade Span (r) and Angle of Attack (Alpha)")
+    ax1.set_xlabel("Blade Span (r) [m]")
+    ax1.set_ylabel("Angle of Attack (Alpha) [deg]")
+    ax1.set_zlabel("Lift Coefficient (Cl)")
+    ax1.view_init(elev=30, azim=45)  # Adjust the view angle
+
+    # Second subplot: cd vs r and alpha_comp
+    ax2 = fig.add_subplot(122, projection='3d')
+    ax2.plot_surface(R, Alpha, cd_new, cmap='plasma', edgecolor='none', alpha=0.8)
+    ax2.set_title("Drag Coefficient (Cd) vs Blade Span (r) and Angle of Attack (Alpha)")
+    ax2.set_xlabel("Blade Span (r) [m]")
+    ax2.set_ylabel("Angle of Attack (Alpha) [deg]")
+    ax2.set_zlabel("Drag Coefficient (Cd)")
+    ax2.view_init(elev=30, azim=45)  # Adjust the view angle
+
+    # Adjust layout
+    plt.tight_layout()
+    
 
 def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
     """Calculate rotor parameters for each blade element"""

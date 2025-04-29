@@ -14,6 +14,7 @@ from __init__ import calculate_rotor_parameters
 from __init__ import plot_3d_airfoil_shape
 from __init__ import save_blade_results
 from __init__ import save_rotor_parameters
+from __init__ import plot_3d_cl_cd_vs_r_alpha
 
 
 
@@ -59,10 +60,8 @@ fig, ax = plot_3d_airfoil_shape(r, c, shape_files)
 
 # 5. Interpolate the airfoil polar data
 alpha_values = np.linspace(0, 180, 100)  # Define alpha range
-cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry,
-                               data_type="cl")
-cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, path_geometry,
-                               data_type="cd")
+cl_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl")
+cd_data, _, _ = interpolate_2d(alpha_values, polar_files_dir, r, data_type="cd")
 alpha_grid = interpolate_2d(alpha_values, polar_files_dir, path_geometry,
                             data_type="alpha")
 
@@ -93,7 +92,7 @@ for wind_speed in wind_speeds:
     results.append({'wind_speed': wind_speed, 'cl': cl_new, 'cd': cd_new,
         'alpha': alpha_comp, 'a': an, 'a_prime': an_prime})
 
-
+plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data,alpha_comp)
 # calculate rotor parameters
 rotor_params = calculate_rotor_parameters(r, w, v ,an,an_prime, rho=1.225)
 
