@@ -11,7 +11,7 @@ from __init__ import interpolate_2d
 from __init__ import compute_a_s
 from __init__ import sigma_calc
 from __init__ import calculate_rotor_parameters
-
+from __init__ import compute_power_and_thrust_curves, plot_power_and_thrust_curves
 
 
 path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
@@ -103,7 +103,6 @@ rotor_params = calculate_rotor_parameters(r, w, v ,an,an_prime, rho=1.225)
 wind_speed_range = np.linspace(3, 25, 30)  # 30 points between 3 and 25 m/s
 
 # Compute power and thrust curves
-from __init__ import compute_power_and_thrust_curves, plot_power_and_thrust_curves  # <- fix import
 
 power_curve, thrust_curve = compute_power_and_thrust_curves(
     wind_speed_range,
@@ -116,7 +115,7 @@ power_curve, thrust_curve = compute_power_and_thrust_curves(
 
 
 # Plot the curves
-plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve)
+plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve, path_operational_strategy)
 
 
 

@@ -276,9 +276,9 @@ def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
     
     # Print total values
     #print("\nTotal Rotor Values:")
-    print(f"Total Thrust = {T/1000:.4f} kN")
+    #print(f"Total Thrust = {T/1000:.4f} kN")
     #print(f"Total Torque = {M/1000:.4f} kNm")
-    print(f"Total Power = {Power/1e6:.4f} MW")
+    #print(f"Total Power = {Power/1e6:.4f} MW")
     #print(f"CT = {CT:.4f}")
     #print(f"CP = {CP:.4f}")
     
@@ -340,7 +340,6 @@ def compute_optimal_strategy(wind_speed, opt_file_path):
 
 # 7 Compute and plot power curve and thrust curve
 
-#def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path, geometry, rho=1.225):
 def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path, geometry, polar_files_dir, path_geometry, rho=1.225):
     polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
     path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
@@ -378,38 +377,47 @@ def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path, geom
 
     return np.array(power), np.array(thrust)
 
-
-def plot_power_and_thrust_curves(wind_speeds, power, thrust):
+def plot_power_and_thrust_curves(wind_speeds, power, thrust, operational_strategy_path):
     """
-    Plot power and thrust curves.
+    Plot power and thrust curves, overlapping real operational strategy data.
 
     Parameters:
-        wind_speeds (array): Array of wind speeds (V_0) in m/s.
-        power (array): Array of power values (P) in kW.
-        thrust (array): Array of thrust values (T) in kN.
+        wind_speeds (array): Computed wind speeds (V_0) in m/s.
+        power (array): Computed power values (P) in kW.
+        thrust (array): Computed thrust values (T) in kN.
+        operational_strategy_path (str): Path to real operational data (.opt file).
     """
-    plt.figure(figsize=(12, 6))
+    # Load real operational strategy data
+    real_data = np.loadtxt(operational_strategy_path, skiprows=1)
+    real_wind_speed = real_data[:, 0]  # Wind speed [m/s]
+    real_power = real_data[:, 3]       # Aerodynamic power [kW]
+    real_thrust = real_data[:, 4]      # Aerodynamic thrust [kN]
+
+    plt.figure(figsize=(14, 6))
 
     # Power curve
     plt.subplot(1, 2, 1)
-    plt.plot(wind_speeds, power, label="Power Curve", color="blue")
+    plt.plot(wind_speeds, power, label="Computed Power Curve(Experiemental)", linestyle='-')
+    plt.plot(real_wind_speed, real_power, label="Real Power Curve", linestyle='--')
     plt.xlabel("Wind Speed (m/s)")
     plt.ylabel("Power (kW)")
-    plt.title("Power Curve (P(V_0))")
+    plt.title("Power Curve: $P(V_0)$")
     plt.grid(True)
     plt.legend()
 
     # Thrust curve
     plt.subplot(1, 2, 2)
-    plt.plot(wind_speeds, thrust, label="Thrust Curve", color="green")
+    plt.plot(wind_speeds, thrust, label="Computed Thrust Curve(Experiemental)", linestyle='-')
+    plt.plot(real_wind_speed, real_thrust, label="Real Thrust Curve", linestyle='--')
     plt.xlabel("Wind Speed (m/s)")
     plt.ylabel("Thrust (kN)")
-    plt.title("Thrust Curve (T(V_0))")
+    plt.title("Thrust Curve: $T(V_0)$")
     plt.grid(True)
     plt.legend()
 
     plt.tight_layout()
     plt.show()
+
 
 
 def compute_rotor_thrust_torque_power(u_new, p, ω, geometry, cl_data, cd_data, rho=1.225):
