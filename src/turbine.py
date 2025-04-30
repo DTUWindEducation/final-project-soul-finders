@@ -1,3 +1,8 @@
+"""
+This module contains the TurbineData class, which handles the loading
+of wind turbine geometry and operational strategy data.
+"""
+
 from pathlib import Path
 import numpy as np
 
@@ -11,9 +16,11 @@ class TurbineData:
         geometry_path (str): Path to the geometry file.
         operational_strategy_path (str): Path to the operational strategy file.
         geometry_data (dict): Dictionary containing
-        geometry data (r, B, c, Ai).
+        geometry data (blade_span_positions, twist,
+        chord_lengths, airfoil_indices).
         operational_strategy_data (dict): Dictionary
-        containing operational strategy data (u, a, w, P, T).
+        containing operational strategy data
+        (wind_speed, angle_pitch, rotational_speed, power, torque).
     """
 
     def __init__(self, geometry_path, operational_strategy_path):
@@ -36,12 +43,21 @@ class TurbineData:
         Load the geometry of the wind turbine blade.
 
         Returns:
-            dict: A dictionary containing blade span positions (r),
-            number of blades (B), chord lengths (c), and airfoil indices (Ai).
+            dict: A dictionary containing blade span
+            positions (blade_span_positions),
+            number of blades (num_blades), chord lengths
+            (chord_lengths), and airfoil indices (airfoil_indices).
         """
         data = np.genfromtxt(self.geometry_path, delimiter='', skip_header=6)
-        r, B, c, Ai = data[:, 0], data[:, 4], data[:, 5], data[:, 6]
-        self.geometry_data = {"r": r, "B": B, "c": c, "Ai": Ai}
+        blade_span_positions, twist_angle, chord_lengths, airfoil_indices = (
+            data[:, 0], data[:, 4], data[:, 5], data[:, 6]
+        )
+        self.geometry_data = {
+            "blade_span_positions": blade_span_positions,
+            "twist_angle": twist_angle,
+            "chord_lengths": chord_lengths,
+            "airfoil_indices": airfoil_indices,
+        }
         return self.geometry_data
 
     def load_operational_strategy(self):
@@ -49,13 +65,19 @@ class TurbineData:
         Load the operational strategy of the wind turbine.
 
         Returns:
-            dict: A dictionary containing wind speed (u),
-            angle pitch (p), rotational speed (w), power (P), and torque (T).
+            dict: A dictionary containing wind speed (wind_speed),
+            angle pitch (angle_pitch), rotational speed (rotational_speed),
+            power (power), and torque (torque).
         """
         data = np.genfromtxt(self.operational_strategy_path,
                              delimiter='', skip_header=1)
-        v, p = data[:, 0], data[:, 1]
-        w, P, T = data[:, 2], data[:, 3], data[:, 4]
-        self.operational_strategy_data = {"v": v, "p": p, "w": w,
-                                          "P": P, "T": T}
+        wind_speed, angle_pitch = data[:, 0], data[:, 1]
+        rotational_speed, power, torque = data[:, 2], data[:, 3], data[:, 4]
+        self.operational_strategy_data = {
+            "wind_speed": wind_speed,
+            "angle_pitch": angle_pitch,
+            "rotational_speed": rotational_speed,
+            "power": power,
+            "torque": torque,
+        }
         return self.operational_strategy_data
