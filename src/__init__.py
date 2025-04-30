@@ -57,6 +57,59 @@ def load_airfoil_polar(path_polar):
         return None, None, None
     
 
+def plot_3d_airfoil_shape(r, c, shape_files):
+    """
+    Plot 3D airfoil shapes along the blade span with a color-coded strip for the span positions.
+    
+    Args:
+        r (array): Blade span positions
+        c (array): Chord lengths
+        shape_files (dict): Dictionary containing paths to airfoil shape files
+    """
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Define color map for different sections
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(r)))
+    
+    # Plot airfoils at each span position
+    for key, folder_path in shape_files.items():
+        for file_name in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, file_name)
+            if os.path.isfile(file_path) and file_name.endswith(".txt"):
+                norm_x, norm_y = load_airfoil_shape(file_path)
+                
+                # Scale and position each airfoil section
+                for i, (span, chord) in enumerate(zip(r, c)):
+                    scaled_x = norm_x * chord
+                    scaled_y = norm_y * chord
+                    z = np.full_like(scaled_x, span)
+                    
+                    # Plot with color corresponding to the span position
+                    ax.plot(scaled_x, scaled_y, z, color=colors[i], alpha=0.6, linewidth=1.5)
+    
+    # Customize the plot
+    ax.set_xlabel("X-axis (Chordwise) [m]")
+    ax.set_ylabel("Y-axis (Thickness) [m]")
+    ax.set_zlabel("Z-axis (Spanwise) [m]")
+    ax.set_title("3D Airfoil Shapes Along Blade Span", pad=20)
+    ax.set_zlim(0, 120)
+    
+    # Set aspect ratio and view angle
+    ax.set_box_aspect([1, 1, 2])
+    ax.view_init(elev=20, azim=45)  # Adjust view angle
+    
+    # Add a color bar to represent the span positions
+    sm = plt.cm.ScalarMappable(cmap=plt.cm.rainbow, norm=plt.Normalize(vmin=r.min(), vmax=r.max()))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, pad=0.1, aspect=30)
+    cbar.set_label("Blade Span Position (r) [m]")
+    
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+    
+    return fig, ax
+
 def sigma_calc(r, c):
     """
     Calculate the solidity of the blade.
@@ -148,7 +201,6 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     return interpolated_data, alpha_grid, blspn_grid
 
 
-
 def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225, tolerance=1e-6, max_iter=10000):
     """
     Compute the axial induction factor (a) and the tangential induction factor (a').
@@ -220,8 +272,7 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225,
         an = a_new
         an_prime = a_prime_new
 
-    
-    
+        
     
     # Debug: Print values for each blade element
     #print(f"Iteration {iteration + 1}:")
@@ -234,8 +285,95 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w, rho=1.225,
    
     return cl_new, cd_new, alpha_comp, an, an_prime, u_new
 
+def save_blade_results(r, u_new, cl_new, cd_new, alpha_comp, an, an_prime, output_dir='./outputs/calculated_blade_parameters'):
+    """
+    Save blade element results to CSV files for each wind speed.
+    
+    Args:
+        r (array): Blade span positions [m]
+        u_new (float): Wind speed [m/s]
+        cl_new (array): Lift coefficients
+        cd_new (array): Drag coefficients
+        alpha_comp (array): Angle of attack [deg]
+        an (array): Axial induction factors
+        an_prime (array): Tangential induction factors
+        output_dir (str): Directory to save results (default: './outputs')
+    """
+    try:
+        # Create output directory if it doesn't exist
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Create DataFrame with all results
+        results_df = pd.DataFrame({
+            'r [m]': r,
+            'Cl [-]': cl_new,
+            'Cd [-]': cd_new,
+            'Alpha [deg]': alpha_comp,
+            'a [-]': an,
+            'a_prime [-]': an_prime
+        })
+        
+        # Save to CSV with wind speed in filename
+        filename = f'blade results V{u_new:.1f}.csv'
+        filepath = Path(output_dir) / filename
+        results_df.to_csv(filepath, index=False)
+        
+        summary_filepath = Path(output_dir) / f'summary_V{u_new:.1f}.csv'
+        
 
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving results: {e}")
+        return False
 
+def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
+    """
+    Plot 3D graphs for cl and cd with respect to blade span (r) and angle of attack (alpha_comp).
+
+    Args:
+        r (array): Blade span positions [m].
+        alpha_values (array): Angle of attack grid [deg].
+        cl_data (2D array): Lift coefficient data for each blade span and angle of attack.
+        cd_data (2D array): Drag coefficient data for each blade span and angle of attack.
+        alpha_comp (array): Angle of attack values to interpolate [deg].
+    """
+    # Create a meshgrid for r and alpha_comp
+    R, Alpha = np.meshgrid(r, alpha_comp, indexing='ij')
+
+    # Interpolate cl and cd data to match the meshgrid
+    cl_new = np.zeros_like(R)
+    cd_new = np.zeros_like(R)
+
+    for i in range(len(r)):
+        # Interpolate cl and cd from alpha_values to alpha_comp
+        cl_new[i, :] = np.interp(alpha_comp, alpha_values, cl_data[i, :])
+        cd_new[i, :] = np.interp(alpha_comp, alpha_values, cd_data[i, :])
+
+    fig = plt.figure(figsize=(16, 8))
+
+    # First subplot: cl vs r and alpha_comp
+    ax1 = fig.add_subplot(121, projection='3d')
+    ax1.plot_surface(R, Alpha, cl_new, cmap='viridis', edgecolor='none', alpha=0.8)
+    ax1.set_title("Lift Coefficient (Cl) vs Blade Span (r) and Angle of Attack (Alpha)")
+    ax1.set_xlabel("Blade Span (r) [m]")
+    ax1.set_ylabel("Angle of Attack (Alpha) [deg]")
+    ax1.set_zlabel("Lift Coefficient (Cl)")
+    ax1.view_init(elev=30, azim=45)  # Adjust the view angle
+
+    # Second subplot: cd vs r and alpha_comp
+    ax2 = fig.add_subplot(122, projection='3d')
+    ax2.plot_surface(R, Alpha, cd_new, cmap='plasma', edgecolor='none', alpha=0.8)
+    ax2.set_title("Drag Coefficient (Cd) vs Blade Span (r) and Angle of Attack (Alpha)")
+    ax2.set_xlabel("Blade Span (r) [m]")
+    ax2.set_ylabel("Angle of Attack (Alpha) [deg]")
+    ax2.set_zlabel("Drag Coefficient (Cd)")
+    ax2.view_init(elev=30, azim=45)  # Adjust the view angle
+
+    # Adjust layout
+    plt.tight_layout()
+    
 
 def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
     """Calculate rotor parameters for each blade element"""
@@ -296,6 +434,45 @@ def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
         'rotor_area': A
     }
 
+
+def save_rotor_parameters(v, rotor_parameters, output_dir='./outputs/rotor_parameters'):
+    """
+    Save rotor parameters (thrust, torque, power, etc.) for each wind speed to a CSV file.
+
+    Args:
+        wind_speeds (array): Array of wind speeds [m/s].
+        rotor_parameters (list of dict): List of dictionaries containing rotor parameters for each wind speed.
+        output_dir (str): Directory to save the results (default: './outputs/rotor_parameters').
+    """
+    try:
+        # Create output directory if it doesn't exist
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+        # Prepare data for saving
+        data = {
+            'Wind Speed [m/s]': v,
+            'Thrust [N]': [params['thrust'] for params in rotor_parameters],
+            'Torque [Nm]': [params['torque'] for params in rotor_parameters],
+            'Power [W]': [params['power'] for params in rotor_parameters],
+            'Thrust Coefficient [-]': [params['thrust_coefficient'] for params in rotor_parameters],
+            'Power Coefficient [-]': [params['power_coefficient'] for params in rotor_parameters],
+            'Rotor Area [m^2]': [params['rotor_area'] for params in rotor_parameters],
+        }
+
+        # Create a DataFrame
+        results_df = pd.DataFrame(data)
+
+        # Save to CSV
+        output_file = Path(output_dir) / 'rotor_parameters.csv'
+        results_df.to_csv(output_file, index=False)
+
+        # print(f"Rotor parameters saved successfully to {output_file}")
+        return True
+
+    except Exception as e:
+        # print(f"Error saving rotor parameters: {e}")
+        return False
+    
 # 6 Compute optimal operational strategy
 def compute_optimal_strategy(wind_speed, opt_file_path):
     """
