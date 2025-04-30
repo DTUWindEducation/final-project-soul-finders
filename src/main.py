@@ -15,6 +15,7 @@ from __init__ import plot_3d_airfoil_shape
 from __init__ import save_blade_results
 from __init__ import save_rotor_parameters
 from __init__ import plot_3d_cl_cd_vs_r_alpha
+from __init__ import compute_power_and_thrust_curves, plot_power_and_thrust_curves
 
 
 
@@ -118,7 +119,6 @@ save_rotor_parameters(wind_speeds, rotor_params_list)
 wind_speed_range = np.linspace(3, 25, 30)  # 30 points between 3 and 25 m/s
 
 # Compute power and thrust curves
-from __init__ import compute_power_and_thrust_curves, plot_power_and_thrust_curves  # <- fix import
 
 power_curve, thrust_curve = compute_power_and_thrust_curves(
     wind_speed_range,
@@ -131,7 +131,7 @@ power_curve, thrust_curve = compute_power_and_thrust_curves(
 
 
 # Plot the curves
-plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve)
+plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve, path_operational_strategy)
 
 
 
