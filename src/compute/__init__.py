@@ -1,3 +1,10 @@
+"""
+This module contains utility functions and classes for wind turbine analysis.
+
+It includes functions for loading airfoil data, computing aerodynamic
+parameters, and saving results, as well as plotting utilities.
+"""
+
 import os
 from pathlib import Path
 from io import StringIO
@@ -6,6 +13,90 @@ import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 
+"""
+This module contains the TurbineData class, which handles the loading
+of wind turbine geometry and operational strategy data.
+"""
+
+from pathlib import Path
+import numpy as np
+
+
+class TurbineData:
+    """
+    A class to handle the loading of wind turbine
+    geometry and operational strategy data.
+
+    Attributes:
+        geometry_path (str): Path to the geometry file.
+        operational_strategy_path (str): Path to the operational strategy file.
+        geometry_data (dict): Dictionary containing
+        geometry data (blade_span_positions, twist,
+        chord_lengths, airfoil_indices).
+        operational_strategy_data (dict): Dictionary
+        containing operational strategy data
+        (wind_speed, angle_pitch, rotational_speed, power, torque).
+    """
+
+    def __init__(self, geometry_path, operational_strategy_path):
+        """
+        Initialize the WindTurbineData object with
+        paths to the geometry and operational strategy files.
+
+        Parameters:
+            geometry_path (str): Path to the geometry file.
+            operational_strategy_path (str):
+            Path to the operational strategy file.
+        """
+        self.geometry_path = Path(geometry_path)
+        self.operational_strategy_path = Path(operational_strategy_path)
+        self.geometry_data = None
+        self.operational_strategy_data = None
+
+    def load_geometry(self):
+        """
+        Load the geometry of the wind turbine blade.
+
+        Returns:
+            dict: A dictionary containing blade span
+            positions (blade_span_positions),
+            number of blades (num_blades), chord lengths
+            (chord_lengths), and airfoil indices (airfoil_indices).
+        """
+        data = np.genfromtxt(self.geometry_path, delimiter='', skip_header=6)
+        blade_span_positions, twist_angle, chord_lengths, airfoil_indices = (
+            data[:, 0], data[:, 4], data[:, 5], data[:, 6]
+        )
+        self.geometry_data = {
+            "blade_span_positions": blade_span_positions,
+            "twist_angle": twist_angle,
+            "chord_lengths": chord_lengths,
+            "airfoil_indices": airfoil_indices,
+        }
+        return self.geometry_data
+
+    def load_operational_strategy(self):
+        """
+        Load the operational strategy of the wind turbine.
+
+        Returns:
+            dict: A dictionary containing wind speed (wind_speed),
+            angle pitch (angle_pitch), rotational speed (rotational_speed),
+            power (power), and torque (torque).
+        """
+        data = np.genfromtxt(self.operational_strategy_path,
+                             delimiter='', skip_header=1)
+        wind_speed, angle_pitch = data[:, 0], data[:, 1]
+        rotational_speed, power, torque = data[:, 2], data[:, 3], data[:, 4]
+        self.operational_strategy_data = {
+            "wind_speed": wind_speed,
+            "angle_pitch": angle_pitch,
+            "rotational_speed": rotational_speed,
+            "power": power,
+            "torque": torque,
+        }
+        return self.operational_strategy_data
+    
 
 # 3. Load the airfoil shape
 def load_airfoil_shape(path_shape):
@@ -116,7 +207,7 @@ def sigma_calc(r, c):
     Returns:
         sigma (function): Function to calculate solidity at a given radius.
     """
-     
+
     # Calculate solidity
     r_safe = np.where(r == 0, 1e-6, r)
     sigma = 3*c / (2 * np.pi * r_safe)
@@ -157,7 +248,7 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     interpolated_data = np.zeros((len(blspn_positions), len(alpha_values)))
 
     # Interpolate for each blade section
-    for i, (alpha_section, data_section) in enumerate(zip(alpha_data, 
+    for i, (alpha_section, data_section) in enumerate(zip(alpha_data,
                                                           polar_data)):
         # Sort alpha and data to ensure proper interpolation
         sort_idx = np.argsort(alpha_section)
@@ -316,7 +407,10 @@ def save_blade_results(r, u_new, cl_new, cd_new, alpha_comp, an,
 
         print(f"Blade results saved successfully to {filepath}")
         return True
-    
+    except Exception as e:
+        print(f"Error saving blade results: {e}")
+        return False
+
 
 def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
     """
@@ -348,7 +442,7 @@ def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
 
     # First subplot: cl vs r and alpha_comp
     ax1 = fig.add_subplot(121, projection='3d')
-    ax1.plot_surface(R, Al, cl_new, cmap='viridis', 
+    ax1.plot_surface(R, Al, cl_new, cmap='viridis',
                      edgecolor='none', alpha=0.8)
     ax1.set_title("Lift Coefficient (Cl) vs Blade Span (r) and Angle of Attack"
                   )
@@ -531,8 +625,8 @@ def compute_optimal_strategy(wind_speed, opt_file_path):
 def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path,
                                     geometry, polar_files_dir, path_geometry,
                                     rho=1.225):
-    polar_files_dir = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
-    path_geometry = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+    polar_files_dir = "../inputs/IEA-15-240-RWT/Airfoils/polar_files"
+    path_geometry = "../inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
 
     """
     Compute power and thrust curves based on the optimal operational strategy.
@@ -562,13 +656,13 @@ def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path,
         cd_data, _, _ = interpolate_2d(np.linspace(-180, 180, 100),
                                        polar_files_dir, path_geometry,
                                        data_type="cd")
-        _, _, _, an, an_prime, _ = compute_a_s(r, B, 
+        _, _, _, an, an_prime, _ = compute_a_s(r, B,
                                                np.linspace(-180, 180, 100),
                                                cl_data, cd_data, sigma,
                                                [u_new], [p], [ω])
         rotor_params = calculate_rotor_parameters(r, [ω], [u_new],
                                                   an, an_prime, rho)
-        
+
         # Append results
         power.append(rotor_params['power'] / 1000)  # Convert to kW
         thrust.append(rotor_params['thrust'] / 1000)  # Convert to kN
@@ -659,3 +753,4 @@ def compute_rotor_thrust_torque_power(u_new, p, ω, geometry, cl_data,
         "torque": rotor_params["torque"],  # Torque [Nm]
         "power": rotor_params["power"],    # Power [W]
     }
+# final line

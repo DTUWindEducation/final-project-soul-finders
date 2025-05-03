@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 # Information on the package
 [project]
-name = "final-project-soul-finders"
+name = "compute"
 description = "A package"
 version = "0.0.1"
 authors = [
@@ -14,7 +14,9 @@ authors = [
 dependencies = [
     "matplotlib",
     "numpy",
-    "pandas"
+    "pandas",
+    "pytest"
 ]
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+
+[project.urls]
+Repository = "https://github.com/DTUWindEducation/final-project-soul-finders.git"
