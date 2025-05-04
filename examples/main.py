@@ -24,11 +24,11 @@ from compute import compute_power_and_thrust_curves, plot_power_and_thrust_curve
 
 
 # Paths to input files
-PATH_GEOMETRY = "../inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-PATH_OPERATIONAL_STRATEGY = "../inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
-SHAPE_FILES = {"cord_files": "../inputs/IEA-15-240-RWT/Airfoils/cord_files"}
-POLAR_FILES = {"polar_files": "../inputs/IEA-15-240-RWT/Airfoils/polar_files"}
-POLAR_FILES_DIR = "../inputs/IEA-15-240-RWT/Airfoils/polar_files"
+PATH_GEOMETRY = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+PATH_OPERATIONAL_STRATEGY = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
+SHAPE_FILES = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
+POLAR_FILES = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
+POLAR_FILES_DIR = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 
 # Initialize the turbine data object
 turbine_data = TurbineData(PATH_GEOMETRY, PATH_OPERATIONAL_STRATEGY)
