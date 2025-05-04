@@ -24,14 +24,14 @@ from compute import compute_power_and_thrust_curves, plot_power_and_thrust_curve
 
 
 # Paths to input files
-PATH_GEOMETRY = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
-PATH_OPERATIONAL_STRATEGY = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
+GEOMETRY_PATH = "./inputs/IEA-15-240-RWT/IEA-15-240-RWT_AeroDyn15_blade.dat"
+OPERATIONAL_STRATEGY_PATH = "./inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
 SHAPE_FILES = {"cord_files": "./inputs/IEA-15-240-RWT/Airfoils/cord_files"}
 POLAR_FILES = {"polar_files": "./inputs/IEA-15-240-RWT/Airfoils/polar_files"}
 POLAR_FILES_DIR = "./inputs/IEA-15-240-RWT/Airfoils/polar_files"
 
 # Initialize the turbine data object
-turbine_data = TurbineData(PATH_GEOMETRY, PATH_OPERATIONAL_STRATEGY)
+turbine_data = TurbineData(GEOMETRY_PATH, OPERATIONAL_STRATEGY_PATH)
 
 # Load geometry data
 geometry = turbine_data.load_geometry()
@@ -71,7 +71,7 @@ cl_data, _, _ = interpolate_2d(alpha_values, POLAR_FILES_DIR, r,
                                data_type="cl")
 cd_data, _, _ = interpolate_2d(alpha_values, POLAR_FILES_DIR, r,
                                data_type="cd")
-alpha_grid = interpolate_2d(alpha_values, POLAR_FILES_DIR, PATH_GEOMETRY,
+alpha_grid = interpolate_2d(alpha_values, POLAR_FILES_DIR, GEOMETRY_PATH,
                             data_type="alpha")
 
 sigma = sigma_calc(r, c)
@@ -127,10 +127,10 @@ save_rotor_parameters(wind_speeds, rotor_params_list)
 # Compute and Plot Power and Thrust Curves
 wind_speed_range = np.linspace(3, 25, 30)  # Define wind speed range
 power_curve, thrust_curve = compute_power_and_thrust_curves(
-    wind_speed_range, PATH_OPERATIONAL_STRATEGY, (r, num_blades, c, airfoil_indices),
-    POLAR_FILES_DIR, PATH_GEOMETRY, rho=1.225
+    wind_speed_range, OPERATIONAL_STRATEGY_PATH, (r, num_blades, c, airfoil_indices),
+    POLAR_FILES_DIR, GEOMETRY_PATH, rho=1.225
 )
 plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve,
-                             PATH_OPERATIONAL_STRATEGY)
+                             OPERATIONAL_STRATEGY_PATH)
 
 # Add a final newline
