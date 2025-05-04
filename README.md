@@ -147,8 +147,8 @@ Below is a conceptual flowchart of our model:
 
 All functions were tested under `src/tests` using `pytest`. Achievements include:
 
-* **80%+ test coverage**: Verified via `pytest --cov=src tests/`
-* **Pylint score > 8.0**: Verified via `pylint src/`
+* **80%+ test coverage**: Verified via `$env:PYTHONPATH="." pytest --cov=src tests/`
+* **Pylint score > 8.0**: Verified via `$env:PYTHONPATH="."; pylint src/`
 
 Example test files:
 
