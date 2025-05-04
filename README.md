@@ -147,8 +147,8 @@ Below is a conceptual flowchart of our model:
 
 All functions were tested under `src/tests` using `pytest`. Achievements include:
 
-* **80%+ test coverage**: Verified via `$env:PYTHONPATH="." pytest --cov=src tests/`
-* **Pylint score > 8.0**: Verified via `$env:PYTHONPATH="."; pylint src/`
+* **80%+ test coverage**: Verified via `pytest --cov=src tests/`
+* **Pylint score > 8.0**: Verified via `pylint src/`
 
 Example test files:
 
@@ -161,4 +161,8 @@ Example test files:
 ## Acknowledgements
 
 This package is developed as part of the 46120 Scientific Programming for Wind Energy course at DTU. We thank the course staff and IEA Task 37 for the open turbine dataset.
+
+# collaboration methodology
+Fernando: Responsible for implementing the last three functions, writing tests for them, and ensuring a good Pylint score for the code.
+Maksymilian: Responsible for implementing the first eight functions.
 
