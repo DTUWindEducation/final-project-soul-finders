@@ -20,13 +20,13 @@ def test_compute_rotor_thrust_torque_power():
     # Operation point
     u_new = 10.0  # m/s
     p = 2.0       # degrees
-    ω = 12.0      # rpm
+    omega = 12.0      # rpm
 
     # Run the function
     result = compute_rotor_thrust_torque_power(
     u_new=[u_new],
     p=[p],
-    ω=[ω],
+    omega=[omega],
     geometry=geometry,
     cl_data=cl_data,
     cd_data=cd_data,
