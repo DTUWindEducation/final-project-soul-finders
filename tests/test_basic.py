@@ -1,5 +1,5 @@
 import pytest
-from src import load_airfoil_shape, load_airfoil_polar
+from src.compute import load_airfoil_shape, load_airfoil_polar
 
 def test_load_airfoil_shape():
     # A simple test to check if airfoil loading works (dummy file)

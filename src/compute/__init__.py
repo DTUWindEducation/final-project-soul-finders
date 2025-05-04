@@ -4,23 +4,19 @@ This module contains utility functions and classes for wind turbine analysis.
 It includes functions for loading airfoil data, computing aerodynamic
 parameters, and saving results, as well as plotting utilities.
 """
-
 import os
 from pathlib import Path
 from io import StringIO
-import pandas as pd
+
 import numpy as np
-from scipy.interpolate import interp1d
+import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 
 """
 This module contains the TurbineData class, which handles the loading
 of wind turbine geometry and operational strategy data.
 """
-
-from pathlib import Path
-import numpy as np
-
 
 class TurbineData:
     """
@@ -96,7 +92,7 @@ class TurbineData:
             "torque": torque,
         }
         return self.operational_strategy_data
-    
+
 
 # 3. Load the airfoil shape
 def load_airfoil_shape(path_shape):
@@ -117,7 +113,7 @@ def load_airfoil_polar(path_polar):
     path_polar = Path(path_polar)
     try:
         # Open the file and preprocess it to extract only the data table
-        with open(path_polar, 'r') as file:
+        with open(path_polar, 'r', encoding='utf-8') as file:
             lines = file.readlines()
 
         # Find the line where the table starts
@@ -140,7 +136,7 @@ def load_airfoil_polar(path_polar):
         # Extract Alpha, Cl, and Cd columns
         alpha, cl, cd = data[:, 0], data[:, 1], data[:, 2]
         return alpha, cl, cd
-    except Exception as e:
+    except (IOError, ValueError) as e:
         print(f"Error loading airfoil polar data: {e}")
         return None, None, None
 
@@ -201,7 +197,7 @@ def sigma_calc(r, c):
 
     Parameters:
         r (array-like): Blade span positions.
-        B (array-like): Number of blades.
+        num_blades (array-like): Number of blades.
         c (array-like): Chord length.
 
     Returns:
@@ -285,7 +281,7 @@ def interpolate_2d(alpha_values, polar_files_dir, r, data_type="cl"):
     return interpolated_data, alpha_grid, blspn_grid
 
 
-def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w,
+def compute_a_s(r, num_blades, alpha_values, cl_data, cd_data, sigma, v, p, w,
                 tolerance=1e-6, max_iter=10000):
     """
     Compute the axial induction factor (a) and the
@@ -308,7 +304,7 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w,
         phi = np.arctan2((1 - an) * u_new, ((1 + an_prime) * w_new * r))
 
         # Calculate angle of attack in degrees
-        alpha_comp = np.degrees(phi) - A_new - B
+        alpha_comp = np.degrees(phi) - A_new - num_blades
         alpha_comp = np.where(r == 0, 0, alpha_comp)  # Handle root section
 
         # Clip alpha to valid range
@@ -321,14 +317,14 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w,
             cl_new[i] = np.interp(alpha_comp[i], alpha_values, cl_data[i, :])
             cd_new[i] = np.interp(alpha_comp[i], alpha_values, cd_data[i, :])
         # Compute normal and tangential coefficients
-        Cn = cl_new * np.cos(phi) - cd_new * np.sin(phi)
-        Ct = cl_new * np.sin(phi) + cd_new * np.cos(phi)
+        c_normal = cl_new * np.cos(phi) - cd_new * np.sin(phi)
+        c_tangential = cl_new * np.sin(phi) + cd_new * np.cos(phi)
 
         # Compute new induction factors with Glauert correction
         a_new = np.zeros_like(r)
         for i in range(len(r)):
-            if Cn[i] > 0:  # Avoid division by zero
-                a_temp = 1 / (4 * np.sin(phi[i])**2 / (sigma[i] * Cn[i]) + 1)
+            if c_normal[i] > 0:  # Avoid division by zero
+                a_temp = 1 / (4 * np.sin(phi[i])**2 / (sigma[i] * c_normal[i]) + 1)
                 # Apply Glauert correction for a > 0.4
                 if a_temp > 0.4:
                     a_new[i] = 0.4
@@ -340,9 +336,9 @@ def compute_a_s(r, B, alpha_values, cl_data, cd_data, sigma, v, p, w,
         # Compute tangential induction factor
         a_prime_new = np.zeros_like(r)
         for i in range(len(r)):
-            if Ct[i] > 0:  # Avoid division by zero
+            if c_tangential[i] > 0:  # Avoid division by zero
                 a_prime_new[i] = 1 / (4 * np.sin(phi[i]) * np.cos(phi[i]) /
-                                      (sigma[i] * Ct[i]) - 1)
+                                      (sigma[i] * c_tangential[i]) - 1)
 
         # Apply relaxation factor
         relaxation = 0.25
@@ -407,7 +403,7 @@ def save_blade_results(r, u_new, cl_new, cd_new, alpha_comp, an,
 
         print(f"Blade results saved successfully to {filepath}")
         return True
-    except Exception as e:
+    except (IOError, ValueError) as e:
         print(f"Error saving blade results: {e}")
         return False
 
@@ -427,11 +423,11 @@ def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
         alpha_comp (array): Angle of attack values to interpolate [deg].
     """
     # Create a meshgrid for r and alpha_comp
-    R, Al = np.meshgrid(r, alpha_comp, indexing='ij')
+    radius, Al = np.meshgrid(r, alpha_comp, indexing='ij')
 
     # Interpolate cl and cd data to match the meshgrid
-    cl_new = np.zeros_like(R)
-    cd_new = np.zeros_like(R)
+    cl_new = np.zeros_like(radius)
+    cd_new = np.zeros_like(radius)
 
     for i in range(len(r)):
         # Interpolate cl and cd from alpha_values to alpha_comp
@@ -442,7 +438,7 @@ def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
 
     # First subplot: cl vs r and alpha_comp
     ax1 = fig.add_subplot(121, projection='3d')
-    ax1.plot_surface(R, Al, cl_new, cmap='viridis',
+    ax1.plot_surface(radius, Al, cl_new, cmap='viridis',
                      edgecolor='none', alpha=0.8)
     ax1.set_title("Lift Coefficient (Cl) vs Blade Span (r) and Angle of Attack"
                   )
@@ -453,7 +449,7 @@ def plot_3d_cl_cd_vs_r_alpha(r, alpha_values, cl_data, cd_data, alpha_comp):
 
     # Second subplot: cd vs r and alpha_comp
     ax2 = fig.add_subplot(122, projection='3d')
-    ax2.plot_surface(R, Al, cd_new, cmap='plasma', edgecolor='none', alpha=0.8)
+    ax2.plot_surface(radius, Al, cd_new, cmap='plasma', edgecolor='none', alpha=0.8)
     ax2.set_title("Drag Coefficient (Cd) vs Blade Span (r) and Angle of Attack"
                   )
     ax2.set_xlabel("Blade Span (r) [m]")
@@ -492,15 +488,15 @@ def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
                  an_prime_mid[i] * (1 - an_mid[i]) * dr[i])
 
     # Calculate total values
-    T = np.sum(dT)
+    thrust = np.sum(dT)
     M = np.sum(dM)
-    P = M * w_new
+    power = M * w_new
 
     # Calculate rotor coefficients
-    R = r[-1]
-    A = np.pi * R**2
-    CT = T / (0.5 * rho * A * u_new**2)
-    CP = P / (0.5 * rho * A * u_new**3)
+    radius = r[-1]
+    A = np.pi * radius**2
+    CT = thrust / (0.5 * rho * A * u_new**2)
+    CP = power / (0.5 * rho * A * u_new**3)
 
     # Print local values for each element
     # for i in range(len(r)-1):
@@ -512,16 +508,16 @@ def calculate_rotor_parameters(r, w, v, an, an_prime, rho=1.225):
 
     # Print total values
     # print("\nTotal Rotor Values:")
-    # print(f"Total Thrust = {T/1000:.4f} kN")
+    # print(f"Total Thrust = {thrust/1000:.4f} kN")
     # print(f"Total Torque = {M/1000:.4f} kNm")
     # print(f"Total Power = {Power/1e6:.4f} MW")
     # print(f"CT = {CT:.4f}")
     # print(f"CP = {CP:.4f}")
 
     return {
-        'thrust': T,
+        'thrust': thrust,
         'torque': M,
-        'power': P,
+        'power': power,
         'thrust_coefficient': CT,
         'power_coefficient': CP,
         'rotor_area': A
@@ -568,7 +564,7 @@ def save_rotor_parameters(v, rotor_parameters,
         print(f"Rotor parameters saved successfully to {output_file}")
         return True
 
-    except Exception as e:
+    except (IOError, ValueError) as e:
         print(f"Error saving rotor parameters: {e}")
 
         return False
@@ -577,7 +573,7 @@ def save_rotor_parameters(v, rotor_parameters,
 # 6 Compute optimal operational strategy
 def compute_optimal_strategy(wind_speed, opt_file_path):
     """
-    Compute optimal blade pitch angle (p) and rotational speed (ω)
+    Compute optimal blade pitch angle (p) and rotational speed (omega)
     as a function of wind speed (u_new)
     based on the provided operational strategy.
 
@@ -587,7 +583,7 @@ def compute_optimal_strategy(wind_speed, opt_file_path):
 
     Returns:
         tuple: Interpolated blade pitch angle (p)
-        in degrees and rotational speed (ω) in rpm.
+        in degrees and rotational speed (omega) in rpm.
     """
     # Check if the file exists
     if not os.path.exists(opt_file_path):
@@ -598,7 +594,7 @@ def compute_optimal_strategy(wind_speed, opt_file_path):
         data = np.loadtxt(opt_file_path, skiprows=1)
         u_new = data[:, 0]  # Wind speed [m/s]
         p = data[:, 1]  # Blade pitch angle [deg]
-        ω = data[:, 2]    # Rotational speed [rpm]
+        omega = data[:, 2]    # Rotational speed [rpm]
     except Exception as e:
         raise ValueError(f"Error reading operational strategy file: {e}")
 
@@ -609,16 +605,16 @@ def compute_optimal_strategy(wind_speed, opt_file_path):
     if wind_speed < u_new.min():
         return 0.0, 0.0  # Default values for non-operational state
     elif wind_speed > u_new.max():
-        return p[-1], ω[-1]  # Use the last available data point
+        return p[-1], omega[-1]  # Use the last available data point
 
     # Create interpolation functions
     p_interp = interp1d(u_new, p, kind='linear', fill_value="extrapolate")
-    ω_interp = interp1d(u_new, ω, kind='linear', fill_value="extrapolate")
+    omega_interp = interp1d(u_new, omega, kind='linear', fill_value="extrapolate")
 
     # Interpolate for the given wind speed
     p_opt = p_interp(wind_speed)
-    ω_opt = ω_interp(wind_speed)
-    return p_opt, ω_opt
+    omega_opt = omega_interp(wind_speed)
+    return p_opt, omega_opt
 
 # 7 Compute and plot power curve and thrust curve
 
@@ -634,19 +630,19 @@ def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path,
     Parameters:
         wind_speeds (array): Array of wind speeds (V_0) in m/s.
         operational_strategy_path (str): Path to the operational strategy file.
-        geometry (tuple): Geometry data (r, B, c, Ai).
+        geometry (tuple): Geometry data (r, num_blades, c, airfoil_indices).
         rho (float): Air density in kg/m^3 (default: 1.225).
 
     Returns:
-        tuple: Arrays of power (P) in kW and thrust (T) in kN 
+        tuple: Arrays of power (power) in kW and thrust (thrust) in kN 
         for each wind speed.
     """
-    r, B, c, Ai = geometry
+    r, num_blades, c, airfoil_indices = geometry
     power = []
     thrust = []
     for u_new in wind_speeds:
-        # Get optimal blade pitch angle (p) and rotational speed (ω)
-        p, ω = compute_optimal_strategy(u_new, operational_strategy_path)
+        # Get optimal blade pitch angle (p) and rotational speed (omega)
+        p, omega = compute_optimal_strategy(u_new, operational_strategy_path)
 
         # Compute rotor parameters (thrust, torque, power)
         sigma = sigma_calc(r, c)
@@ -656,11 +652,11 @@ def compute_power_and_thrust_curves(wind_speeds, operational_strategy_path,
         cd_data, _, _ = interpolate_2d(np.linspace(-180, 180, 100),
                                        polar_files_dir, path_geometry,
                                        data_type="cd")
-        _, _, _, an, an_prime, _ = compute_a_s(r, B,
+        _, _, _, an, an_prime, _ = compute_a_s(r, num_blades,
                                                np.linspace(-180, 180, 100),
                                                cl_data, cd_data, sigma,
-                                               [u_new], [p], [ω])
-        rotor_params = calculate_rotor_parameters(r, [ω], [u_new],
+                                               [u_new], [p], [omega])
+        rotor_params = calculate_rotor_parameters(r, [omega], [u_new],
                                                   an, an_prime, rho)
 
         # Append results
@@ -677,8 +673,8 @@ def plot_power_and_thrust_curves(wind_speeds, power, thrust,
 
     Parameters:
         wind_speeds (array): Computed wind speeds (V_0) in m/s.
-        power (array): Computed power values (P) in kW.
-        thrust (array): Computed thrust values (T) in kN.
+        power (array): Computed power values (power) in kW.
+        thrust (array): Computed thrust values (thrust) in kN.
         operational_strategy_path (str): Path to real operational
         data (.opt file).
     """
@@ -698,7 +694,7 @@ def plot_power_and_thrust_curves(wind_speeds, power, thrust,
              linestyle='--')
     plt.xlabel("Wind Speed (m/s)")
     plt.ylabel("Power (kW)")
-    plt.title("Power Curve: $P(V_0)$")
+    plt.title("Power Curve: $power(V_0)$")
     plt.grid(True)
     plt.legend()
 
@@ -710,7 +706,7 @@ def plot_power_and_thrust_curves(wind_speeds, power, thrust,
              linestyle='--')
     plt.xlabel("Wind Speed (m/s)")
     plt.ylabel("Thrust (kN)")
-    plt.title("Thrust Curve: $T(V_0)$")
+    plt.title("Thrust Curve: $thrust(V_0)$")
     plt.grid(True)
     plt.legend()
 
@@ -718,39 +714,45 @@ def plot_power_and_thrust_curves(wind_speeds, power, thrust,
     plt.show()
 
 
-def compute_rotor_thrust_torque_power(u_new, p, ω, geometry, cl_data,
+def compute_rotor_thrust_torque_power(u_new, p, omega, geometry, cl_data,
                                       cd_data, rho=1.225):
     """
-    Compute thrust (T), torque (M), and power (P) of the rotor.
+    Compute thrust (thrust), torque (M), and power (power) of the rotor.
 
     Parameters:
         u_new (float): Inflow wind speed [m/s].
         p (float): Blade pitch angle [deg].
-        ω (float): Rotational speed [rad/s].
-        geometry (tuple): Geometry data (r, B, c, Ai).
+        omega (float): Rotational speed [rad/s].
+        geometry (tuple): Geometry data (r, num_blades, c, airfoil_indices).
         cl_data (array): Lift coefficient data.
         cd_data (array): Drag coefficient data.
         rho (float): Air density [kg/m^3] (default: 1.225).
 
     Returns:
-        dict: Dictionary containing thrust (T), torque (M), and power (P).
+        dict: Dictionary containing thrust (thrust), torque (M), and power (power).
     """
-    r, B, c, Ai = geometry
+    r, num_blades, c, airfoil_indices = geometry
 
     # Compute solidity
     sigma = sigma_calc(r, c)
 
+    # Convert to scalar if wrapped in lists
+    u_scalar = u_new[0] if isinstance(u_new, list) else u_new
+    p_scalar = p[0] if isinstance(p, list) else p
+    ω_scalar = omega[0] if isinstance(omega, list) else omega
+
     # Compute axial and tangential induction factors
-    _, _, _, an, an_prime = compute_a_s(
-        r, u_new, ω, p, B, np.linspace(-180, 180, 100), cl_data, cd_data, sigma
+    _, _, _, an, an_prime, _ = compute_a_s(
+        r, num_blades, np.linspace(-180, 180, 100), cl_data, cd_data, sigma, [u_scalar], [p_scalar], [ω_scalar]
     )
 
     # Compute rotor parameters
-    rotor_params = calculate_rotor_parameters(r, an, an_prime, rho)
+    rotor_params = calculate_rotor_parameters(r, [ω_scalar], [u_scalar], an, an_prime, rho)
 
     return {
         "thrust": rotor_params["thrust"],  # Thrust [N]
         "torque": rotor_params["torque"],  # Torque [Nm]
         "power": rotor_params["power"],    # Power [W]
     }
-# final line
+
+# End of file

@@ -1,71 +1,164 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/zjSXGKeR)
-# Our Great Package
 
-**Team**: [Soul - Finders]
+# Soul - Finders: Wind Turbine Modeling using BEM
+
+**Team**: Soul - Finders
 
 ## Overview
 
-Welcome to our very different project of wind turbine modeling. The project aims to develop a sophisticated Blade Element Momentum (BEM) model to predict the aerodynamic performance of wind turbines, specifically focusing on the IEA 15 MW offshore reference turbine. This package utilizes advanced aerodynamics and modeling techniques to assist in the design, analysis, and optimization of wind turbine blades. 
+This project implements a steady-state Blade Element Momentum (BEM) model to predict the aerodynamic performance of wind turbines, using the IEA 15 MW offshore reference turbine as a case study.
 
-The work integrates the Blade Element Momentum theory with detailed turbine data, including geometry, airfoils, and polar data, to provide accurate and efficient predictions for turbine performance.
+Our Python package simulates rotor behavior based on geometry, airfoil shape, and aerodynamic polars, allowing the calculation of thrust, torque, power, and efficiency. It supports visualization and data export, helping researchers and engineers optimize turbine blade designs and operational strategies.
 
-## Quick-start guide
+## Quick Start Guide
 
-### 1. **Clone the repository** 
+### 1. Clone the Repository
 
-   To get started with this project, clone the repository to your local machine using:
-   ```bash
-   git clone https://github.com/YourUsername/your-repository-name.git
+```bash
+git clone https://github.com/YourUsername/final-project-soul-finders.git
+cd final-project-soul-finders
+```
 
-### 2. **Install dependencies**
+### 2. Install Dependencies
 
-Ensure that you have the required libraries and packages installed. You can do this by running:
+You need Python 3.8 or above and the following Python packages:
+
+* numpy
+* pandas
+* matplotlib
+* scipy
+* pytest
+* pytest-cov
+
+Install everything by running:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. **Run the model**
+If `requirements.txt` is not available, manually install:
 
-Once everything is set up, you can run the main script to start modeling the wind turbine blades:
 ```bash
+pip install numpy pandas matplotlib scipy pytest pytest-cov
+```
+
+### 3. Run the Model
+
+```bash
+cd examples
 python main.py
 ```
 
-### 4. **Output**
+### 4. Customize Inputs
 
-The script will output visualizations of the blade parameters, including rotor design characteristics, aerodynamic forces, and other relevant data.
+Modify the `inputs/IEA-15-240-RWT` folder to simulate different turbines. You can change the airfoil shapes, polar files, and blade geometry.
 
-### 5. **Customize inputs**
+### 5. Output
 
-You can modify the input files for different wind turbine models, airfoil shapes, or rotor configurations. The default settings are based on the IEA 15 MW offshore reference turbine.
+The results (plots and `.csv` files) will be saved in the `outputs/` directory, covering:
 
-## Architecture
+* Blade aerodynamic parameters for each wind speed
+* Rotor thrust, torque, and power
+* Power and thrust curves
 
-This project is designed with modularity and flexibility in mind. It consists of the following main components:
+---
 
-### 1. `data_loader.py`
-Responsible for importing the geometry, airfoil shapes, and polar data from external files. It parses and stores the information needed for the aerodynamic calculations.
+## Project Structure
 
-### 2. `bem_model.py`
-Contains the core of the Blade Element Momentum theory. This module computes the forces and performance metrics of the wind turbine based on the input data.
+```
+final-project-soul-finders/
+├── examples/
+│   └── main.py                   # Main entry point for running the model
+├── inputs/                       # Contains turbine geometry and airfoil data
+├── outputs/                      # Auto-generated results (plots, CSVs)
+├── src/
+│   ├── compute/                  # Core computational modules
+│   │   └── __init__.py           # Includes classes and functions for BEM model
+├── tests/                        # Unit tests
+├── pyproject.toml                # Metadata and package configuration
+├── LICENSE
+├── README.md
+├── project_info.md
+└── .gitignore
+```
 
-### 3. `analysis.py`
-Used for performing advanced calculations on the blade parameters and visualizing the aerodynamic forces, such as lift, drag, and thrust at each blade element.
+---
 
-### 4. `visualization.py`
-Generates visualizations of the blade's geometry, aerodynamic performance, and other key metrics for analysis and optimization purposes.
+## Architecture and Class Description
 
-### 5. `utils.py`
-Includes helper functions that support various operations, such as data conversion, interpolation, and performance calculations.
+### `TurbineData` Class – *Located in* `src/compute/__init__.py`
 
+Handles all data input and preprocessing:
 
-## Peer review
+* **Attributes**:
 
-Our team followed a structured peer review process to ensure code quality, maintainability, and correctness:
+  * `geometry_path`
+  * `operational_strategy_path`
+* **Methods**:
 
-- **Code Reviews:** Each member reviewed another teammate’s module, checking for logical consistency, readability, and documentation.
-- **Testing:** We tested each module independently and in integration to confirm the accuracy of calculations and data handling.
-- **Feedback Loop:** Constructive feedback was shared via Git, ensuring timely fixes and improvements.
-- **Version Control:** All changes were tracked using Git branches and pull requests, enabling collaborative and conflict-free development.
+  * `load_geometry()` – Reads the blade geometry (span, chord, twist, airfoil index).
+  * `load_operational_strategy()` – Loads wind speed, pitch angle, and rotor speed.
 
-This approach helped us maintain high standards and align our code with the project's objectives.
+### Functional Modules
+
+* `load_airfoil_shape()` – Loads airfoil shapes from coordinates.
+* `load_airfoil_polar()` – Extracts aerodynamic polar data.
+* `interpolate_2d()` – Interpolates Cl/Cd values across span and angle of attack.
+* `compute_a_s()` – Calculates axial and tangential induction factors.
+* `calculate_rotor_parameters()` – Computes thrust, torque, and power.
+* `compute_power_and_thrust_curves()` – Computes and compares predicted vs. real performance curves.
+* `plot_3d_airfoil_shape()`, `plot_3d_cl_cd_vs_r_alpha()` – Visualization helpers.
+
+### Example Run: `main.py`
+
+This script orchestrates the modeling pipeline:
+
+1. Loads geometry and polars
+2. Computes lift/drag and induction factors
+3. Calculates rotor outputs
+4. Plots 3D geometry and performance curves
+5. Saves data to `.csv` for further analysis
+
+---
+
+## Example Diagram
+
+Below is a conceptual flowchart of our model:
+
+```
+    [Geometry + Operational Strategy + Polars]
+                     |
+         -----------------------------
+         |                           |
+    [TurbineData]            [Airfoil Data Loader]
+         |                           |
+         ---------[compute_a_s()]----------
+                         |
+         [calculate_rotor_parameters()]
+                         |
+       [Power / Thrust / Torque Output]
+                         |
+       [Visualization + CSV Export]
+```
+
+---
+
+## Testing and Quality Assurance
+
+All functions were tested under `src/tests` using `pytest`. Achievements include:
+
+* **80%+ test coverage**: Verified via `pytest --cov=src tests/`
+* **Pylint score > 8.0**: Verified via `pylint src/`
+
+Example test files:
+
+* `test_basic.py`: Unit tests for loading data
+* `test_rotor_computation.py`: Validates thrust, torque, power calculations
+* `test_operational_strategy.py`: Checks interpolation and strategy extraction
+
+---
+
+## Acknowledgements
+
+This package is developed as part of the 46120 Scientific Programming for Wind Energy course at DTU. We thank the course staff and IEA Task 37 for the open turbine dataset.
+
