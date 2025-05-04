@@ -36,9 +36,9 @@ turbine_data = TurbineData(PATH_GEOMETRY, PATH_OPERATIONAL_STRATEGY)
 # Load geometry data
 geometry = turbine_data.load_geometry()
 r = geometry["blade_span_positions"]
-B = geometry["twist_angle"]
+num_blades = geometry["twist_angle"]
 c = geometry["chord_lengths"]
-Ai = geometry["airfoil_indices"]
+airfoil_indices = geometry["airfoil_indices"]
 
 # Load operational strategy data
 operational_strategy = turbine_data.load_operational_strategy()
@@ -76,7 +76,7 @@ alpha_grid = interpolate_2d(alpha_values, POLAR_FILES_DIR, PATH_GEOMETRY,
 
 sigma = sigma_calc(r, c)
 # Compute tangential and axial induction factors
-_, _, _, an, an_prime, _ = compute_a_s(r, B, alpha_values, cl_data, cd_data,
+_, _, _, an, an_prime, _ = compute_a_s(r, num_blades, alpha_values, cl_data, cd_data,
                                        sigma, v, p, w, tolerance=1e-6,
                                        max_iter=1000)
 
@@ -87,7 +87,7 @@ results = []
 # Compute for each wind speed
 for wind_speed in wind_speeds:
     cl_new, cd_new, alpha_comp, an, an_prime, u_new = compute_a_s(
-        r=r, B=B, alpha_values=alpha_values, cl_data=cl_data,
+        r=r, num_blades=num_blades, alpha_values=alpha_values, cl_data=cl_data,
         cd_data=cd_data, sigma=sigma, v=[wind_speed],  # Pass as list
         p=p, w=w, tolerance=1e-6, max_iter=1000
     )
@@ -113,7 +113,7 @@ rotor_params_list = []
 # Compute rotor parameters for each wind speed
 for wind_speed in wind_speeds:
     cl_new, cd_new, alpha_comp, an, an_prime, u_new = compute_a_s(
-        r=r, B=B, alpha_values=alpha_values, cl_data=cl_data,
+        r=r, num_blades=num_blades, alpha_values=alpha_values, cl_data=cl_data,
         cd_data=cd_data, sigma=sigma, v=[wind_speed],  # Pass as list
         p=p, w=w, tolerance=1e-6, max_iter=1000
     )
@@ -127,7 +127,7 @@ save_rotor_parameters(wind_speeds, rotor_params_list)
 # Compute and Plot Power and Thrust Curves
 wind_speed_range = np.linspace(3, 25, 30)  # Define wind speed range
 power_curve, thrust_curve = compute_power_and_thrust_curves(
-    wind_speed_range, PATH_OPERATIONAL_STRATEGY, (r, B, c, Ai),
+    wind_speed_range, PATH_OPERATIONAL_STRATEGY, (r, num_blades, c, airfoil_indices),
     POLAR_FILES_DIR, PATH_GEOMETRY, rho=1.225
 )
 plot_power_and_thrust_curves(wind_speed_range, power_curve, thrust_curve,

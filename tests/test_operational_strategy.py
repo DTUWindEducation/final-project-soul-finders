@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src import compute_optimal_strategy
+from src.compute import compute_optimal_strategy
 
 def test_compute_optimal_strategy():
     operational_strategy_path = "inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"

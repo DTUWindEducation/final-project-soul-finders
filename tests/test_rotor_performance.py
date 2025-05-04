@@ -1,14 +1,10 @@
 import sys
 import os
 import numpy as np
+import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src import (
-    interpolate_2d,
-    compute_a_s,
-    calculate_rotor_parameters,
-    sigma_calc  # <<<<< ADD THIS
-)
-from src.turbine import TurbineData
+from src.compute import (interpolate_2d, compute_a_s, calculate_rotor_parameters, sigma_calc)
+from src.compute import TurbineData
 
 def test_rotor_performance():
     # Load real blade geometry
@@ -17,8 +13,8 @@ def test_rotor_performance():
         operational_strategy_path="inputs/IEA-15-240-RWT/IEA_15MW_RWT_Onshore.opt"
     )
     geometry = turbine_data.load_geometry()
-    r = geometry['r']
-    c = geometry['c']
+    r = geometry['blade_span_positions']
+    c = geometry['chord_lengths']
     B = 3  # 3 blades
 
     sigma = sigma_calc(r, c)
